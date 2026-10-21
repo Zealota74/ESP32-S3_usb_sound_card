@@ -7,7 +7,7 @@
  * Zasady użycia:
  *  - rozmiar bufora musi być potęgą dwójki,
  *  - FIFO_Write() wywołuje wyłącznie producent (np. callback USB),
- *  - FIFO_Read() i FIFO_Flush() wywołuje wyłącznie konsument (np. task I2S),
+ *  - FIFO_Read() wywołuje wyłącznie konsument (np. task I2S),
  *  - producent i konsument mogą działać w różnych wątkach, przerwaniach
  *    lub na różnych rdzeniach bez blokad (indeksy wr/rd są zapisywane
  *    każdy przez jedną stronę),
@@ -53,12 +53,7 @@ uint32_t FIFO_Write(FIFO_t *f, const uint8_t *data, uint32_t bytes);
 /* Konsument. Zwraca liczbę odczytanych bajtów (może być mniej niż bytes). */
 uint32_t FIFO_Read(FIFO_t *f, uint8_t *data, uint32_t bytes);
 
-/* Konsument. Odrzuca wszystkie dane aktualnie w buforze. */
-void     FIFO_Flush(FIFO_t *f);
-
 uint32_t FIFO_Available(const FIFO_t *f);   /* bajty do odczytu */
-uint32_t FIFO_Free(const FIFO_t *f);        /* wolne miejsce w bajtach */
-uint32_t FIFO_GetSize(const FIFO_t *f);
 uint32_t FIFO_GetOverruns(const FIFO_t *f);
 
 #ifdef __cplusplus

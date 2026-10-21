@@ -13,6 +13,26 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
+// =========================== Volueme calib =============================
+/* Zakres zgłaszany hostowi przez USBAudioCard (GET_MIN / GET_MAX, krok 1 dB). */
+#ifndef VOL_HOST_MIN_DB
+#define VOL_HOST_MIN_DB   (-50)
+#endif
+#ifndef VOL_HOST_MAX_DB
+#define VOL_HOST_MAX_DB   (0)
+#endif
+
+/* Krok klawisza głośności w Windows (2 %) i liczba punktów krzywej (0..100 %). */
+#define VOL_CAL_STEP_PCT  2
+#define VOL_CAL_POINTS    (100 / VOL_CAL_STEP_PCT + 1)
+
+
+/* dB od hosta -> pozycja suwaka 0..100 % (najbliższa możliwa przy kroku 1 dB). */
+int   VOL_HostToPercent(float host_db);
+
+/* dB od hosta -> mnożnik amplitudy 0..1; poziom minimalny (suwak 0 %) daje 0. */
+float VOL_HostToGain(float host_db);
+// =======================================================================
 
 typedef struct {
   uint32_t packets;         /* liczba odebranych pakietów */
@@ -64,6 +84,44 @@ void     USB_HidPoll(void);
 /* Ile kroków czeka jeszcze na wysłanie (0 = wszystkie wysłane). */
 int32_t  USB_HidPending(void);
 void     USB_HidMuteToggle(void);
+
+/* ---------------------------------------------------------------------------
+ * Poziomy głośności: jeden tick enkodera = jeden poziom.
+ * Poziomy to wszystkie wartości dB, które Windows faktycznie wysyła do karty
+ * (zmierzone klawiszami +-2 %). Poziom 0 = suwak 0 % (MUTE), poziom
+ * VOL_LEVELS-1 = 0 dB (100 %). Pozostałe pozycje suwaka dają to samo dB co
+ * sąsiedni poziom, więc na urządzeniu są nierozróżnialne i pomijane.
+ * ------------------------------------------------------------------------- */
+#define VOL_LEVELS          32
+
+/* Czas oczekiwania na reakcję hosta po wysłanym klawiszu (ms). Gdy Windows nie
+ * zmienia dB (klawisz w obrębie jednego poziomu), tyle trwa taki "pusty" krok. */
+#ifndef VOL_ACK_TIMEOUT_MS
+#define VOL_ACK_TIMEOUT_MS  50
+#endif
+
+/* Zabezpieczenie: tyle klawiszy pod rząd bez zmiany dB naszej karty i regulator
+ * się poddaje (np. host nie odpowiada). Najdłuższy "pusty" odcinek krzywej to
+ * kilka klawiszy, więc wartość ma zapas. */
+#ifndef VOL_MAX_NOCHANGE
+#define VOL_MAX_NOCHANGE    12
+#endif
+
+/* dB od hosta -> numer poziomu 0..VOL_LEVELS-1 (najbliższy z tabeli). */
+int      VOL_LevelFromHost(float host_db);
+/* Numer poziomu -> procent do wyświetlenia (zgodny z suwakiem Windows). */
+int      VOL_LevelPercent(int level);
+
+/* Przesuwa głośność o 'ticks' poziomów (+ głośniej, - ciszej), z ograniczeniem
+ * do 0..VOL_LEVELS-1. Tylko zapisuje cel; klawisze wysyła USB_VolPoll(). */
+void     USB_VolStep(int32_t ticks);
+/* Wołaj z loop() w każdym przebiegu: wysyła klawisze HID po jednym i sprawdza
+ * po każdym, jakie dB ustawił Windows, aż osiągnie poziom docelowy. */
+void     USB_VolPoll(void);
+/* Poziom do pokazania na OLED: docelowy w trakcie ruchu, inaczej bieżący. */
+int      USB_VolLevel(void);
+/* 1 = trwa dochodzenie do poziomu docelowego. */
+int      USB_VolBusy(void);
 
 /* Aktualna głośność (master) w dB, całkowite dB z biblioteki, i stan mute. */
 float    USB_GetVolumeDb(void);
