@@ -84,6 +84,51 @@ AudioStats stats;
 i2s_chan_handle_t txHandle = nullptr;
 TaskHandle_t audioTaskHandle = nullptr;
 
+// ============================= poprawki Claude ============================
+constexpr uint32_t FIFO_SIZE   = 16384;          // ~93 ms
+constexpr uint32_t FIFO_TARGET = FIFO_SIZE / 2;  // ~46 ms
+constexpr uint32_t BLOCK_FRAMES = 256;
+
+struct Resampler {
+  int16_t prev[2] = {0, 0}, cur[2] = {0, 0};
+  float phase = 0;
+  int16_t buf[64 * 2];
+  uint32_t pos = 0, cnt = 0;
+
+  void reset() { prev[0]=prev[1]=cur[0]=cur[1]=0; phase=0; pos=cnt=0; }
+
+  bool nextFrame(int16_t *f) {
+    if (pos >= cnt) {
+      cnt = audioFIFO.read((uint8_t *)buf, sizeof(buf)) / BYTES_PER_FRAME;
+      pos = 0;
+      if (cnt == 0) return false;
+    }
+    f[0] = buf[pos * 2];
+    f[1] = buf[pos * 2 + 1];
+    pos++;
+    return true;
+  }
+
+  // zwraca liczbę wygenerowanych ramek (< frames = underrun)
+  uint32_t process(int16_t *out, uint32_t frames, float ratio) {
+    for (uint32_t i = 0; i < frames; i++) {
+      phase += ratio;
+      while (phase >= 1.0f) {
+        phase -= 1.0f;
+        prev[0] = cur[0]; prev[1] = cur[1];
+        if (!nextFrame(cur)) return i;
+      }
+      out[i * 2]     = prev[0] + (int16_t)((cur[0] - prev[0]) * phase);
+      out[i * 2 + 1] = prev[1] + (int16_t)((cur[1] - prev[1]) * phase);
+    }
+    return frames;
+  }
+};
+
+
+
+// ==========================================================================
+
 /***************************************************************************
  *                         AUDIO FIFO
  ***************************************************************************/
@@ -290,195 +335,47 @@ bool initI2S_old() {
 	return true;
 }
 
-void audioTask(void *parameter) {
-
-	while (true) {
-		static uint32_t audioBlock = 0;
-		audioBlock++;
-
-		if (!audioStartupReady()) {
-			vTaskDelay(pdMS_TO_TICKS(5));
-			continue;
-		}
-
-
-		// --- USB / FIFO diagnostyka ---
-		static uint32_t lastUsbPrint = 0;
-
-		if (millis() - lastUsbPrint > 1000) {
-			lastUsbPrint = millis();
-
-			uint32_t usbAge = millis() - lastUsbPacketTime;
-			Serial.printf(
-			  "USB age=%lu ms FIFO=%lu BLOCK=%lu\n",
-			  usbAge,
-			  audioFIFO.available(),
-			  audioBlock);
-		}
-
-
-		// --- Pobranie danych z FIFO ---
-		uint32_t bytes = audioFIFO.read(i2sDMABuffer, sizeof(i2sDMABuffer));
-
-		// --- SYNCHRONIZACJA SPRZĘTOWA ---
-		// Teraz wywołujemy to tutaj, aby utrzymać płynność pracy
-		// synchronizeFIFO();
-
-
-		// test
-		if (bytes != sizeof(i2sDMABuffer)) {
-			Serial.printf(
-			  "SHORT AUDIO READ bytes=%lu FIFO=%lu BLOCK=%lu\n",
-			  bytes,
-			  audioFIFO.available(),
-			  audioBlock);
-		}
-		// test
-
-
-		// --- wykrywanie pustego FIFO ---
-		static bool wasEmpty = false;
-
-		bool fifoEmpty = (bytes == 0);
-
-		if (fifoEmpty && !wasEmpty) {
-
-			Serial.printf(
-			  "FIFO EMPTY START available=%lu\n",
-			  audioFIFO.available());
-		}
-
-		if (!fifoEmpty && wasEmpty) {
-			Serial.println("FIFO DATA RETURN");
-		}
-
-		wasEmpty = fifoEmpty;
-
-
-
-		// --- diagnostyka ciągłości PCM ---
-
-		int16_t *samples = (int16_t *)i2sDMABuffer;
-
-		int32_t maxJumpL = 0;
-		int32_t maxJumpR = 0;
-
-		static int16_t lastL = 0;
-		static int16_t lastR = 0;
-
-		uint32_t sampleCount = bytes / 4;
-
-
-		for (uint32_t i = 0; i < sampleCount; i++) {
-
-			int16_t L = samples[i * 2];
-			int16_t R = samples[i * 2 + 1];
-
-
-			int32_t jumpL = abs((int32_t)L - lastL);
-			int32_t jumpR = abs((int32_t)R - lastR);
-
-
-			if (jumpL > maxJumpL)
-				maxJumpL = jumpL;
-
-			if (jumpR > maxJumpR)
-				maxJumpR = jumpR;
-
-
-			lastL = L;
-			lastR = R;
-		}
-
-
-		if (maxJumpL > 12000 || maxJumpR > 12000) {
-
-			Serial.printf(
-			  "PCM JUMP L=%ld R=%ld FIFO=%lu\n",
-			  maxJumpL,
-			  maxJumpR,
-			  audioFIFO.available());
-		}
-
-
-
-		// --- zabezpieczenie underrun ---
-
-		if (bytes < sizeof(i2sDMABuffer)) {
-
-			if (bytes == 0) {
-
-				stats.fifoUnderrun++;
-
-				Serial.printf(
-				  "AUDIO ZERO FIFO=%lu\n",
-				  audioFIFO.available());
-			}
-
-
-			memset(
-			  i2sDMABuffer + bytes,
-			  0,
-			  sizeof(i2sDMABuffer) - bytes);
-		}
-
-
-
-		// --- OLED diagnostyka ---
-
-
-
-		// test
-		static uint32_t lastBlockPrint = 0;
-		if (millis() - lastBlockPrint > 5000) {
-			lastBlockPrint = millis();
-			Serial.printf(
-			  "I2S blocks=%lu FIFO=%lu\n",
-			  audioBlock,
-			  audioFIFO.available());
-		}
-		// test
-
-
-		oled_audioBlock = audioBlock;
-		oled_fifo = audioFIFO.available();
-
-
-
-		// --- wysyłanie do I2S ---
-
-		size_t written = 0;
-
-
-		uac.applyVolume(
-		  i2sDMABuffer,
-		  sizeof(i2sDMABuffer));
-
-		uint32_t t0 = micros();
-		esp_err_t err = i2s_channel_write(
-		  txHandle,
-		  i2sDMABuffer,
-		  sizeof(i2sDMABuffer),
-		  &written,
-		  portMAX_DELAY);
-
-		uint32_t dt = micros() - t0;
-		if (dt > 5000) {
-			Serial.printf(
-			  "I2S WRITE DELAY=%lu us BLOCK=%lu FIFO=%lu\n",
-			  dt,
-			  audioBlock,
-			  audioFIFO.available());
-		}
-
-
-		if (err != ESP_OK) {
-
-			Serial.printf(
-			  "I2S ERROR=%d\n",
-			  err);
-		}
-	}
+void audioTask(void *) {
+  static int16_t out[BLOCK_FRAMES * 2];
+  static Resampler rs;
+  bool playing = false;
+  float fifoAvg = 0;
+
+  while (true) {
+    uint32_t level = audioFIFO.available();
+
+    if (!playing && level >= FIFO_TARGET) {      // prefill + histereza
+      playing = true;
+      fifoAvg = level;
+      rs.reset();
+    }
+
+    if (playing) {
+      fifoAvg += 0.02f * ((float)level - fifoAvg);
+      float err = (fifoAvg - FIFO_TARGET) / (float)FIFO_TARGET;
+      float ratio = 1.0f + constrain(err * 0.002f, -0.002f, 0.002f);
+
+      uint32_t n = rs.process(out, BLOCK_FRAMES, ratio);
+      if (n < BLOCK_FRAMES) {                    // underrun: wygaś ogon
+        int16_t lL = n ? out[(n - 1) * 2]     : 0;
+        int16_t lR = n ? out[(n - 1) * 2 + 1] : 0;
+        for (uint32_t i = n; i < BLOCK_FRAMES; i++) {
+          float g = 1.0f - (float)(i - n) / (BLOCK_FRAMES - n);
+          out[i * 2]     = lL * g;
+          out[i * 2 + 1] = lR * g;
+        }
+        playing = false;
+        stats.fifoUnderrun++;
+      }
+    } else {
+      memset(out, 0, sizeof(out));               // DMA dalej dostaje ciągły strumień
+    }
+
+    uac.applyVolume((uint8_t *)out, sizeof(out));
+    size_t written;
+    i2s_channel_write(txHandle, out, sizeof(out), &written, portMAX_DELAY);
+    // brak Serial.print w tym tasku!
+  }
 }
 
 /***************************************************************************
