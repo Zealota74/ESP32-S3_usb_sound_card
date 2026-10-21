@@ -52,6 +52,10 @@
 #define IR_CMD_B          0x11
 #define IR_CMD_C          0x12
 #define IR_CMD_D          0x13
+#define IR_CMD_A_LONG     0x14   /* odpowiednik długiego naciśnięcia klawisza A..D */
+#define IR_CMD_B_LONG     0x15
+#define IR_CMD_C_LONG     0x16
+#define IR_CMD_D_LONG     0x17
 #define IR_REPEAT_A       0
 #define IR_REPEAT_B       1
 #define IR_REPEAT_C       0
@@ -77,5 +81,11 @@ void INPUT_attach_keyA(InputCallback cb);
 void INPUT_attach_keyB(InputCallback cb);
 void INPUT_attach_keyC(InputCallback cb);
 void INPUT_attach_keyD(InputCallback cb);
+
+/* Długie naciśnięcie klawiszy A..D (ok. 0,8 s): druga funkcja klawisza. */
+void INPUT_attach_keyA_long(InputCallback cb);
+void INPUT_attach_keyB_long(InputCallback cb);
+void INPUT_attach_keyC_long(InputCallback cb);
+void INPUT_attach_keyD_long(InputCallback cb);
 
 #endif

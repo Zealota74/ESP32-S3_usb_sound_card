@@ -11,6 +11,7 @@
 #include "audio_config.h"
 #include "audio_out.h"
 #include "audio_source.h"
+#include "audio_spectrum.h"
 #include "fifo.h"
 #include "drift.h"
 
@@ -37,6 +38,11 @@ static volatile bool     s_playing = false;
 static volatile bool  s_guardActive = true;
 static volatile float s_gainTarget = 0.0f;
 static volatile float s_guardGain = 1.0f;
+
+/* Widmo: liczone w loop (AUDIO_Poll), tylko gdy włączone. */
+static bool     s_specOn = false;
+static uint32_t s_specSeq = 0, s_specReadSeq = 0;
+static uint32_t s_fftUs = 0;
 
 /* Cache głośności (odświeżany w AUDIO_Poll) i znacznik czasu ostatniego odświeżenia. */
 static AUDIO_Volume_t s_vol;
@@ -77,6 +83,8 @@ static void audioFill( int16_t * out, uint32_t frames, void * ctx ) {
 	}
 	s_playing = playing;
 
+	SPEC_Feed( out, frames ); /* tap dla widma: po drift, przed głośnością (widmo nie zależy od poziomu) */
+
 	/* głośność (źródło + limit startowy): jeden mnożnik z rampą w obrębie bloku (bez trzasków) */
 	gNew = s_gainTarget * ( s_guardActive ? s_guardGain : 1.0f );
 	if ( !( gPrev == 1.0f && gNew == 1.0f ) ) {
@@ -105,6 +113,8 @@ int AUDIO_Init( const AUDIO_Config_t * cfg ) {
 	     !DRIFT_Init( &s_drift, &s_fifo, AUDIO_FIFO_TARGET_BYTES ) ) {
 		return AUDIO_ERR_FIFO;
 	}
+
+	SPEC_Init( AUDIO_SAMPLE_RATE );
 
 	oc.sample_rate  = AUDIO_SAMPLE_RATE;
 	oc.channels     = AUDIO_CHANNELS;
@@ -146,6 +156,14 @@ void AUDIO_Poll( uint32_t now_ms ) {
 		/* mute strony sterującej wycisza też wyjście (wcześniej tylko zmieniał napis na OLED) */
 		s_gainTarget = s_vol.mute ? 0.0f : s_vol.gain;
 	}
+
+	if ( s_specOn ) {
+		uint32_t t0 = AUDIO_OUT_TimeUs();
+		if ( SPEC_Process() ) {
+			s_fftUs = AUDIO_OUT_TimeUs() - t0;
+			s_specSeq++;
+		}
+	}
 }
 // ---------------------------------------------------------------------------------------------
 void AUDIO_GetVolume( AUDIO_Volume_t * v ) {
@@ -172,6 +190,59 @@ void AUDIO_GuardRelease( void ) {
 	s_guardActive = false;
 }
 // ---------------------------------------------------------------------------------------------
+void AUDIO_SpectrumEnable( int on ) {
+	if ( on && !s_specOn ) {
+		SPEC_Reset();
+		s_specReadSeq = s_specSeq;
+	}
+	s_specOn = ( on != 0 );
+}
+// ---------------------------------------------------------------------------------------------
+void AUDIO_SpectrumSetBars( int bars ) {
+	SPEC_SetBars( bars );
+}
+// ---------------------------------------------------------------------------------------------
+int AUDIO_SpectrumGetBars( void ) {
+	return SPEC_GetBars();
+}
+// ---------------------------------------------------------------------------------------------
+void AUDIO_SpectrumCycleBars( int dir ) {
+	static const int opts[] = { 7, 16, 32 };
+	const int n = (int)( sizeof( opts ) / sizeof( opts[ 0 ] ) );
+	int cur = SPEC_GetBars();
+	int idx = 1;
+
+	for ( int i = 0; i < n; i++ ) {
+		if ( opts[ i ] == cur ) idx = i;
+	}
+	idx = ( idx + ( dir >= 0 ? 1 : n - 1 ) ) % n;
+	SPEC_SetBars( opts[ idx ] );
+}
+// ---------------------------------------------------------------------------------------------
+void AUDIO_SpectrumFallStep( int dir ) {
+	SPEC_SetFall( SPEC_GetFall() + ( dir >= 0 ? 1 : -1 ) );
+}
+// ---------------------------------------------------------------------------------------------
+int AUDIO_SpectrumGetFallMs( void ) {
+	return (int)SPEC_GetFallMs();
+}
+// ---------------------------------------------------------------------------------------------
+int AUDIO_SpectrumFallIndex( void ) {
+	return SPEC_GetFall();
+}
+// ---------------------------------------------------------------------------------------------
+int AUDIO_SpectrumFallSteps( void ) {
+	return SPEC_FallSteps();
+}
+// ---------------------------------------------------------------------------------------------
+int AUDIO_GetSpectrum( AUDIO_Spectrum_t * out ) {
+	if ( s_specSeq == s_specReadSeq ) return 0;
+	s_specReadSeq = s_specSeq;
+	out->bars = (uint8_t)SPEC_GetBars();
+	SPEC_GetFrame( out->level, out->peak );
+	return 1;
+}
+// ---------------------------------------------------------------------------------------------
 void AUDIO_GetStats( AUDIO_Stats_t * out, int reset_minmax ) {
 	uint32_t fMin = s_fifoMin, fMax = s_fifoMax;
 	bool playing = s_playing;
@@ -192,6 +263,7 @@ void AUDIO_GetStats( AUDIO_Stats_t * out, int reset_minmax ) {
 	out->fifo_min = fMin;
 	out->fifo_max = fMax;
 	out->consumed_frames = DRIFT_GetConsumedFrames( &s_drift );
+	out->fft_us = s_fftUs;
 	out->drift_ppm = playing ? (int32_t)( ( DRIFT_GetRatio( &s_drift ) - 1.0f ) * 1000000.0f ) : 0;
 
 	memset( &out->src, 0, sizeof( out->src ) );

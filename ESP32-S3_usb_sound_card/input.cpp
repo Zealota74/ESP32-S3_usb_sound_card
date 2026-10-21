@@ -45,6 +45,11 @@ static InputCallback _cbKeyB = NULL;
 static InputCallback _cbKeyC = NULL;
 static InputCallback _cbKeyD = NULL;
 
+static InputCallback _cbKeyALong = NULL;
+static InputCallback _cbKeyBLong = NULL;
+static InputCallback _cbKeyCLong = NULL;
+static InputCallback _cbKeyDLong = NULL;
+
 // =========================== OBIEKTY BIBLIOTEK ==========================
 static SimonEncoder encoder(ENCODERA_PIN, ENCODERB_PIN, ENCODER_TYPE, ENCODER_ACCEL);
 static OneButton btnEnc(ENCODER_PIN, ACTIVE_LOW, PULLUP_ENABLE);
@@ -140,15 +145,19 @@ static void _doubleEnc()  { if (_cbDouble != NULL) _cbDouble(); }
 
 #if BTN_KEY_A_USED
 static void _clickKeyA() { if (_cbKeyA != NULL) _cbKeyA(); }
+static void _longKeyA()  { if (_cbKeyALong != NULL) _cbKeyALong(); }
 #endif
 #if BTN_KEY_B_USED
 static void _clickKeyB() { if (_cbKeyB != NULL) _cbKeyB(); }
+static void _longKeyB()  { if (_cbKeyBLong != NULL) _cbKeyBLong(); }
 #endif
 #if BTN_KEY_C_USED
 static void _clickKeyC() { if (_cbKeyC != NULL) _cbKeyC(); }
+static void _longKeyC()  { if (_cbKeyCLong != NULL) _cbKeyCLong(); }
 #endif
 #if BTN_KEY_D_USED
 static void _clickKeyD() { if (_cbKeyD != NULL) _cbKeyD(); }
+static void _longKeyD()  { if (_cbKeyDLong != NULL) _cbKeyDLong(); }
 #endif
 
 // ===================== PILOT IR: KOD -> TO SAMO CO KLAWISZ A..D ====================
@@ -163,6 +172,10 @@ static const IrMap_t kIrMap[] = {
 	{ IR_CMD_B, IR_REPEAT_B, &_cbKeyB },
 	{ IR_CMD_C, IR_REPEAT_C, &_cbKeyC },
 	{ IR_CMD_D, IR_REPEAT_D, &_cbKeyD },
+	{ IR_CMD_A_LONG, 0, &_cbKeyALong },
+	{ IR_CMD_B_LONG, 0, &_cbKeyBLong },
+	{ IR_CMD_C_LONG, 0, &_cbKeyCLong },
+	{ IR_CMD_D_LONG, 0, &_cbKeyDLong },
 };
 
 static void irDispatch( const IRMP_DATA * d ) {
@@ -191,15 +204,19 @@ void INPUT_init() {
 
 #if BTN_KEY_A_USED
     keyA.attachClick(_clickKeyA);
+    keyA.attachLongPressStart(_longKeyA);
 #endif
 #if BTN_KEY_B_USED
     keyB.attachClick(_clickKeyB);
+    keyB.attachLongPressStart(_longKeyB);
 #endif
 #if BTN_KEY_C_USED
     keyC.attachClick(_clickKeyC);
+    keyC.attachLongPressStart(_longKeyC);
 #endif
 #if BTN_KEY_D_USED
     keyD.attachClick(_clickKeyD);
+    keyD.attachLongPressStart(_longKeyD);
 #endif
 
     encoder.attachOnRight(_cbRight);
@@ -225,9 +242,13 @@ void INPUT_attach_double_click(InputCallback cb) {
     if (cb != NULL) btnEnc.attachDoubleClick(_doubleEnc);   // dopiero tu, bo dwuklik opóźnia pojedynczy klik
 }
 void INPUT_attach_keyA(InputCallback cb)         { _cbKeyA = cb; }
+void INPUT_attach_keyA_long(InputCallback cb)    { _cbKeyALong = cb; }
 void INPUT_attach_keyB(InputCallback cb)         { _cbKeyB = cb; }
+void INPUT_attach_keyB_long(InputCallback cb)    { _cbKeyBLong = cb; }
 void INPUT_attach_keyC(InputCallback cb)         { _cbKeyC = cb; }
+void INPUT_attach_keyC_long(InputCallback cb)    { _cbKeyCLong = cb; }
 void INPUT_attach_keyD(InputCallback cb)         { _cbKeyD = cb; }
+void INPUT_attach_keyD_long(InputCallback cb)    { _cbKeyDLong = cb; }
 
 void INPUT_proc() {
     uint8_t b = s_keyBits;   // poziomy przycisków spróbkowane w timerze

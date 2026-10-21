@@ -44,6 +44,7 @@ typedef struct {
   uint32_t fifo_min;           /* minimum/maksimum poziomu od ostatniego skasowania */
   uint32_t fifo_max;
   uint32_t consumed_frames;    /* ramki zdjęte z FIFO od startu */
+  uint32_t fft_us;             /* czas ostatniej FFT widma (0 = jeszcze nie liczona) */
   int32_t  drift_ppm;          /* bieżąca korekta tempa (0 poza odtwarzaniem) */
   AUDIO_SrcStats_t src;        /* statystyki źródła */
 } AUDIO_Stats_t;
@@ -72,6 +73,26 @@ void AUDIO_MediaKey(AUDIO_MediaKey_t key);
  * jeszcze się nie odezwał). Zdejmuje go odezwanie się hosta albo AUDIO_GuardRelease(). */
 int  AUDIO_GuardActive(void);
 void AUDIO_GuardRelease(void);
+
+/* Analizator widma. Liczony w AUDIO_Poll() (czyli w loop()), tylko gdy włączony.
+ * Próbki pochodzą z toru audio przed regulacją głośności, więc widmo nie zależy od poziomu. */
+#define AUDIO_SPECTRUM_MAX_BARS  32
+
+typedef struct {
+  uint8_t  bars;                              /* liczba słupków: 7, 16 lub 32 */
+  uint8_t  level[AUDIO_SPECTRUM_MAX_BARS];    /* wysokość słupka 0..255 */
+  uint8_t  peak[AUDIO_SPECTRUM_MAX_BARS];     /* kreska szczytu 0..255 */
+} AUDIO_Spectrum_t;
+
+void AUDIO_SpectrumEnable(int on);            /* włącz tylko, gdy widmo jest wyświetlane */
+void AUDIO_SpectrumSetBars(int bars);         /* 7, 16 lub 32 */
+int  AUDIO_SpectrumGetBars(void);
+void AUDIO_SpectrumCycleBars(int dir);        /* +1 / -1: 7 -> 16 -> 32 -> 7 (cyklicznie) */
+int  AUDIO_GetSpectrum(AUDIO_Spectrum_t *out);/* 1 = nowa ramka od ostatniego wywołania */
+void AUDIO_SpectrumFallStep(int dir);         /* +1 szybsze opadanie słupków, -1 wolniejsze (bez zawijania) */
+int  AUDIO_SpectrumGetFallMs(void);           /* czas opadania słupka z pełnej skali do zera (ms) */
+int  AUDIO_SpectrumFallIndex(void);           /* 0 = najwolniej ... AUDIO_SpectrumFallSteps()-1 = najszybciej */
+int  AUDIO_SpectrumFallSteps(void);
 
 /* Statystyki; reset_minmax = 1 zeruje fifo_min/fifo_max po odczycie. */
 void AUDIO_GetStats(AUDIO_Stats_t *out, int reset_minmax);

@@ -37,6 +37,9 @@ int      AUDIO_OUT_Start(AUDIO_OutFillFn fill, void *ctx);
 /* Liczba błędów zapisu do peryferium od startu. */
 uint32_t AUDIO_OUT_GetErrors(void);
 
+/* Monotoniczny czas w mikrosekundach (tylko do pomiarów diagnostycznych, np. czasu FFT). */
+uint32_t AUDIO_OUT_TimeUs(void);
+
 #ifdef __cplusplus
 }
 #endif

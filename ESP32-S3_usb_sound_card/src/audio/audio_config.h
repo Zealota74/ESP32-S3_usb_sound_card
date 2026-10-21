@@ -28,4 +28,19 @@
 #define AUDIO_VOL_POLL_MS       50
 #endif
 
+/* ---- Analizator widma ---- */
+#define AUDIO_SPECTRUM_FFT_N       4096    /* potęga 2; okno analizy (93 ms przy 44,1 kHz) */
+#define AUDIO_SPECTRUM_HOP         1024    /* co tyle nowych próbek liczymy FFT (512 = gładziej, 2x CPU) */
+#define AUDIO_SPECTRUM_F_LOW       30      /* Hz, dolna krawędź pierwszego pasma */
+#define AUDIO_SPECTRUM_F_HIGH      20000   /* Hz, górna krawędź ostatniego pasma */
+#define AUDIO_SPECTRUM_DB_TOP      (-15)   /* dB (energia pasma, 0 dB = sinus pełnej skali) = pełny słupek */
+#define AUDIO_SPECTRUM_DB_FLOOR    (-75)   /* dB = pusty słupek */
+/* Czas opadania słupka z pełnej skali do zera (ms), od najwolniejszego do najszybszego.
+ * Regulowany w czasie pracy (ekran SPECTRUM, długie naciśnięcie B/D); przeliczany na krok na ramkę z hopa i częstotliwości
+ * próbkowania, więc zmiana AUDIO_SPECTRUM_HOP nie zmienia wrażenia. */
+#define AUDIO_SPECTRUM_FALL_MS_LIST  { 1500, 1000, 700, 500, 350, 250, 150, 100 }
+#define AUDIO_SPECTRUM_FALL_DEFAULT  3     /* indeks na liście: 500 ms */
+#define AUDIO_SPECTRUM_PEAK_HOLD   20      /* ramki podtrzymania kreski szczytu */
+#define AUDIO_SPECTRUM_PEAK_FALL   4       /* opadanie kreski szczytu na ramkę */
+
 #endif /* AUDIO_CONFIG_H */

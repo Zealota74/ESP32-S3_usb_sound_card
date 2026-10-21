@@ -109,3 +109,7 @@ int AUDIO_OUT_Start( AUDIO_OutFillFn fill, void * ctx ) {
 uint32_t AUDIO_OUT_GetErrors( void ) {
 	return s_errors;
 }
+// ---------------------------------------------------------------------------------------------
+uint32_t AUDIO_OUT_TimeUs( void ) {
+	return (uint32_t)micros();
+}
