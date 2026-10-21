@@ -245,6 +245,11 @@ void USB_HidPoll(void)
   }
 }
 
+int32_t USB_HidPending(void)
+{
+  return s_hidPending;
+}
+
 void USB_HidMuteToggle(void)
 {
   s_consumer.press(CONSUMER_CONTROL_MUTE);

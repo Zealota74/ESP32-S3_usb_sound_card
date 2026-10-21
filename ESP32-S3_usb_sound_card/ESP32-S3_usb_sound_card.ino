@@ -20,6 +20,7 @@
 #include "input.h"
 #include "ui_oled.h"
 #include "volume.h"
+#include "vol_calib.h"
 
 /***************************************************************************
  *                              KONFIGURACJA
@@ -37,17 +38,16 @@
 #define FIFO_TARGET_BYTES   (FIFO_SIZE_BYTES / 2)   /* punkt pracy i próg startu */
 
 #define AUDIO_DIAG_SERIAL   0        /* 1 = co sekundę statystyki audio na Serial (USB/FIFO fps, FIFO %) */
-#define VOL_DIAG_SERIAL     0        /* 1 = log "VOL host=... eff=..." przy zmianie głośności */
+#define VOL_DIAG_SERIAL     0        /* 1 = log "VOL host=... -> ...%" przy zmianie głośności */
 #define DIAG_PERIOD_MS      1000
 #define OLED_PERIOD_MS      100
 #define VOL_PERIOD_MS       50
 
-/* Głośność po starcie, w dB efektywnych (wzmocnienie w torze audio, 0 dB = pełna).
- * W bibliotece USB ustawiana jest odpowiadająca jej wartość hosta (przed
- * podłączeniem do hosta). Jeśli biblioteka jej nie przyjmie, ta sama wartość
- * działa jako awaryjny limit do pierwszej zmiany głośności z Windows lub dwuklika. */
-#define STARTUP_EFF_DB      (-20)
-#define STARTUP_VOL_DB      (STARTUP_EFF_DB * (-VOL_HOST_MIN_DB) / VOL_EFF_RANGE_DB)
+/* Głośność po starcie w dB (zakres VOL_HOST_MIN_DB..0, 0 dB = pełna).
+ * Ustawiana w bibliotece USB przed podłączeniem do hosta. Jeśli biblioteka jej
+ * nie przyjmie, ta sama wartość działa jako awaryjny limit do pierwszej zmiany
+ * głośności z Windows lub dwuklika. */
+#define STARTUP_VOL_DB      (-20)
 
 /***************************************************************************
  *                              STAN GLOBALNY
@@ -217,8 +217,8 @@ static void diagPrint(uint32_t now)
 /***************************************************************************
  *                    CALLBACKI WEJŚĆ (enkoder / przycisk)
  ***************************************************************************/
-static void onEncRotate(int steps)     { USB_HidVolumeStep(steps); }   /* głośność Windows */
-static void onBtnClick(void)           { USB_HidMuteToggle(); }
+static void onEncRotate(int steps)     { if (!VCAL_IsActive()) USB_HidVolumeStep(steps); }   /* głośność Windows */
+static void onBtnClick(void)           { if (!VCAL_IsActive()) USB_HidMuteToggle(); }
 static void onBtnLongPress(void)       { UI_ToggleDebug(); }           /* ekran diagnostyczny */
 static void onBtnDoubleClick(void)     { g_guardActive = false; UI_SetGuard(0, 0.0f); }  /* zwolnij limit */
 
@@ -266,9 +266,10 @@ void setup()
   }
 
   /* głośność startowa: biblioteka USB, a przy niepowodzeniu awaryjny limit w torze audio */
-  g_guardGainQ15 = (int32_t)(powf(10.0f, (float)STARTUP_EFF_DB / 20.0f) * 32768.0f);
+  VCAL_Init();                                  /* krzywa głośności Windows z NVS (jeśli była kalibracja) */
+  g_guardGainQ15 = (int32_t)(powf(10.0f, (float)STARTUP_VOL_DB / 20.0f) * 32768.0f);
   g_guardActive = !USB_Init(&g_fifo, (int8_t)STARTUP_VOL_DB);
-  UI_SetGuard(g_guardActive ? 1 : 0, (float)STARTUP_EFF_DB);
+  UI_SetGuard(g_guardActive ? 1 : 0, (float)STARTUP_VOL_DB);
   if (g_guardActive) INPUT_attach_double_click(onBtnDoubleClick);   /* dwuklik zwalnia awaryjny limit */
 
   xTaskCreatePinnedToCore(i2sTask, "I2S", 4096, NULL, configMAX_PRIORITIES - 1, NULL, 1);
@@ -283,10 +284,17 @@ void loop()
   INPUT_proc();                                 /* enkoder + przyciski (callbacki) */
   USB_HidPoll();                                /* wysyła zaległe kroki głośności */
   USB_DebugPoll();                              /* log zdarzeń volume/mute od hosta (diagnostyka) */
-  while (Serial.available()) {                 /* komendy diagnostyczne: 'd' = zrzut tabeli głośności, 'c' = wyczyść */
+  VCAL_Proc(now);                               /* kalibracja krzywej głośności (gdy uruchomiona) */
+  /* komendy z monitora szeregowego:
+   *   'd' = zrzut tabeli głośności, 'c' = wyczyść tabelę,
+   *   'k' = kalibracja krzywej głośności Windows, 'p' = wypisz krzywą, 'r' = krzywa domyślna */
+  while (Serial.available()) {
     int ch = Serial.read();
     if (ch == 'd') USB_DebugDump();
     else if (ch == 'c') USB_DebugClear();
+    else if (ch == 'k') VCAL_Start();
+    else if (ch == 'p') VCAL_Print();
+    else if (ch == 'r' && !VCAL_IsActive()) VCAL_Reset();
   }
 
   if (now - tVol >= VOL_PERIOD_MS) {
@@ -298,20 +306,22 @@ void loop()
     {
       float host = USB_GetVolumeDb();
       int muted = USB_IsMuted();
-      float eff = VOL_HostToEffDb(host);
+      int pct = VOL_HostToPercent(host);            /* pozycja suwaka Windows 0..100 */
 
-      g_gainTarget = muted ? 0.0f : VOL_DbToGain(eff);
+      /* sygnał: dokładnie dB z Windows, suwak na 0 = cisza; podczas kalibracji cisza */
+      g_gainTarget = (muted || VCAL_IsActive()) ? 0.0f : VOL_HostToGain(host);
 #if VOL_DIAG_SERIAL
       {
         static int lastHost = 12345, lastMute = -1;
         if ((int)host != lastHost || muted != lastMute) {   /* log przy każdej zmianie głośności */
           lastHost = (int)host;
           lastMute = muted;
-          Serial.printf("VOL host=%d dB eff=%.1f dB mute=%d\n", (int)host, (double)eff, muted);
+          Serial.printf("VOL host=%d dB -> %d %% gain=%.4f mute=%d\n", (int)host, pct, (double)VOL_HostToGain(host), muted);
         }
       }
 #endif
-      UI_SetVolume(eff, muted);
+      UI_SetVolume(pct, muted);
+      UI_SetCalib(VCAL_Progress());
       UI_SetHostDb((int)host);
     }
   }

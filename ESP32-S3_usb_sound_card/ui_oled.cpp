@@ -12,7 +12,7 @@
 
 static U8G2_SH1122_256X64_F_4W_HW_SPI u8g2(U8G2_R2, CS_OLED, DC_OLED, RESET_OLED);
 
-static volatile float    s_db = 0.0f;
+static volatile int      s_pct = 0;
 static volatile int      s_mute = 0;
 static volatile uint32_t s_dbgBlock = 0, s_dbgFifo = 0, s_dbgUsb = 0;
 static volatile int      s_debugScreen = 0;
@@ -20,6 +20,7 @@ static volatile int      s_dirty = 1;
 static volatile int      s_hostDb = 0;
 static volatile int      s_guard = 0;
 static volatile float    s_guardDb = 0.0f;
+static volatile int      s_calib = -1;
 
 void UI_Init(void)
 {
@@ -31,12 +32,21 @@ void UI_Init(void)
   s_dirty = 1;
 }
 
-void UI_SetVolume(float db, int mute)
+void UI_SetVolume(int percent, int mute)
 {
-  /* porównanie z tolerancją 0.05 dB, żeby nie przerysowywać bez potrzeby */
-  if (isinf(db) != isinf(s_db) || fabsf(db - s_db) > 0.05f || mute != s_mute) {
-    s_db = db;
+  if (percent < 0)   percent = 0;
+  if (percent > 100) percent = 100;
+  if (percent != s_pct || mute != s_mute) {     /* przerysuj tylko przy zmianie */
+    s_pct = percent;
     s_mute = mute;
+    s_dirty = 1;
+  }
+}
+
+void UI_SetCalib(int progress)
+{
+  if (progress != s_calib) {
+    s_calib = progress;
     s_dirty = 1;
   }
 }
@@ -70,29 +80,27 @@ void UI_ToggleDebug(void)
 
 static void drawVolume(void)
 {
-  float db = s_db;
-  int mute = s_mute;
+  int pct = s_pct;
+  int calib = s_calib;
   char txt[24];
   float frac;
   int fill;
 
-  if (isinf(db) || db <= UI_DB_MIN) {
-    frac = 0.0f;
-    snprintf(txt, sizeof(txt), "-inf dB");
-  } else {
-    if (db > 0.0f) db = 0.0f;
-    frac = (db - UI_DB_MIN) / (0.0f - UI_DB_MIN);
-    snprintf(txt, sizeof(txt), "%.1f dB", (double)db);
-  }
-  if (mute) {
+  if (calib >= 0) {                            /* kalibracja: pasek = postęp pomiaru */
+    frac = (float)calib / 100.0f;
+    snprintf(txt, sizeof(txt), "%d %%", calib);
+  } else if (s_mute) {
     frac = 0.0f;
     snprintf(txt, sizeof(txt), "MUTE");
+  } else {
+    frac = (float)pct / 100.0f;
+    snprintf(txt, sizeof(txt), "%d", pct);
   }
 
   u8g2.clearBuffer();
 
   u8g2.setFont(u8g2_font_logisoso28_tf);
-  u8g2.drawStr(0, 30, "Volume");
+  u8g2.drawStr(0, 30, (calib >= 0) ? "CAL" : "Volume");
 
   u8g2.setFont(u8g2_font_logisoso20_tf);
   u8g2.drawStr(256 - u8g2.getStrWidth(txt), 28, txt);
@@ -124,7 +132,7 @@ static void drawDebug(void)
   u8g2.drawStr(0, 26, txt);
   snprintf(txt, sizeof(txt), "USB %lu", (unsigned long)s_dbgUsb);
   u8g2.drawStr(0, 40, txt);
-  snprintf(txt, sizeof(txt), "VOL %.1f dB (host %d)%s", (double)s_db, (int)s_hostDb, s_mute ? " MUTE" : "");
+  snprintf(txt, sizeof(txt), "VOL %d (host %d dB)%s", (int)s_pct, (int)s_hostDb, s_mute ? " MUTE" : "");
   u8g2.drawStr(0, 54, txt);
 
   u8g2.sendBuffer();

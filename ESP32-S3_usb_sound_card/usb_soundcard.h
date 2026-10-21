@@ -61,6 +61,8 @@ uint32_t USB_GetPacketAgeMs(void);
  */
 void     USB_HidVolumeStep(int32_t steps);
 void     USB_HidPoll(void);
+/* Ile kroków czeka jeszcze na wysłanie (0 = wszystkie wysłane). */
+int32_t  USB_HidPending(void);
 void     USB_HidMuteToggle(void);
 
 /* Aktualna głośność (master) w dB, całkowite dB z biblioteki, i stan mute. */
