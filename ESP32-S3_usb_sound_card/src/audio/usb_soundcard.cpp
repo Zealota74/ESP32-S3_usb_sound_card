@@ -1,6 +1,6 @@
 /*
- * usb_soundcard.cpp - część zależna od platformy (ESP32-S3 + USBAudioCard).
- * Cała reszta projektu widzi tylko funkcje USB_*.
+ * usb_soundcard.cpp - źródło audio USB (ESP32-S3 + USBAudioCard).
+ * Reszta projektu widzi tylko obiekt AUDIO_SRC_USB (na końcu pliku).
  */
 #include <Arduino.h>
 #include "USB.h"
@@ -20,7 +20,7 @@
 
 static USBAudioCard s_uac( AUDIO_SAMPLE_RATE, UAC_BPS_16, UAC_SPK_STEREO, UAC_MIC_NONE );
 static USBHIDConsumerControl s_consumer;
-static FIFO_t * s_rxFifo = NULL;
+static AUDIO_PushFn s_push = NULL;
 
 static volatile uint32_t s_packets = 0;
 static volatile uint32_t s_bytes = 0;
@@ -54,6 +54,7 @@ static volatile uint32_t s_dbgDropped = 0;
 #define DBG_TAB_UNMUTE 1001
 static int16_t s_dbgTab[ DBG_TAB_SIZE ];
 static int s_dbgTabN = 0;
+#endif
 // ============================================================================================
 
 // ============================================================================================
@@ -61,9 +62,9 @@ static int s_dbgTabN = 0;
 static void usbRxCallback( void * data, uint16_t len ) {
 	uint32_t written;
 
-	if ( s_rxFifo == NULL ) return;
+	if ( s_push == NULL ) return;
 
-	written = FIFO_Write( s_rxFifo, (const uint8_t*)data, len );
+	written = s_push( (const uint8_t*)data, len );
 
 	s_packets++;
 	s_bytes += written;
@@ -105,6 +106,7 @@ static void uacEventCb( void * arg, esp_event_base_t base, int32_t id, void * da
 #endif
 }
 // ---------------------------------------------------------------------------------------------
+#if USB_DEBUG_EVENTS
 static void dbgTabAdd( int16_t v ) {
 	if ( s_dbgTabN >= DBG_TAB_SIZE ) { /* pełna: wyrzuć najstarszy wpis */
 		memmove( &s_dbgTab[ 0 ], &s_dbgTab[ 1 ], ( DBG_TAB_SIZE - 1 ) * sizeof( s_dbgTab[ 0 ] ) );
@@ -172,10 +174,10 @@ void USB_DebugClear( void ) {
 #endif
 }
 // ---------------------------------------------------------------------------------------------
-int USB_Init( FIFO_t * rx_fifo, int8_t initial_vol_db ) {
+int USB_Init( AUDIO_PushFn push, int8_t initial_vol_db ) {
 	int ok;
 
-	s_rxFifo = rx_fifo;
+	s_push = push;
 
 	USB.VID( 0x303A );
 	USB.PID( 0x4001 );
@@ -253,6 +255,22 @@ int32_t USB_HidPending( void ) {
 // ---------------------------------------------------------------------------------------------
 void USB_HidMuteToggle( void ) {
 	s_consumer.press( CONSUMER_CONTROL_MUTE );
+	s_consumer.release();
+}
+// ---------------------------------------------------------------------------------------------
+/* Kody z HID Usage Tables, strona Consumer (0x0C). Własne stałe, żeby nie zależeć od nazw w bibliotece. */
+#define HID_USAGE_SCAN_NEXT_TRACK   0x00B5
+#define HID_USAGE_SCAN_PREV_TRACK   0x00B6
+
+void USB_HidMediaKey( AUDIO_MediaKey_t key ) {
+	uint16_t usage;
+
+	switch ( key ) {
+		case AUDIO_MEDIA_NEXT: usage = HID_USAGE_SCAN_NEXT_TRACK; break;
+		case AUDIO_MEDIA_PREV: usage = HID_USAGE_SCAN_PREV_TRACK; break;
+		default: return;
+	}
+	s_consumer.press( usage );
 	s_consumer.release();
 }
 
@@ -407,4 +425,52 @@ int USB_VolLevel( void ) {
 int USB_VolBusy( void ) {
 	return ( s_volTarget >= 0 ) ? 1 : 0;
 }
+// ==============================================================================================================
+
+// ==============================================================================================================
+/* ====================== Adapter źródła audio (interfejs z audio_source.h) ====================== */
+static int srcInit( AUDIO_PushFn push, int8_t initial_vol_db ) {
+	return USB_Init( push, initial_vol_db );
+}
+// ----------------------------------------------------------------------------------------------------
+static void srcPoll( void ) {
+	USB_VolPoll();     /* dochodzi do poziomu docelowego klawiszami HID */
+	USB_DebugPoll();   /* log zdarzeń volume/mute od hosta (diagnostyka) */
+}
+// ----------------------------------------------------------------------------------------------------
+static void srcGetVolume( AUDIO_Volume_t * v ) {
+	float host = USB_GetVolumeDb();
+	int hostLevel = VOL_LevelFromHost( host );
+
+	v->host_db = host;
+	v->gain = VOL_HostToGain( host );
+	v->level = USB_VolLevel();             /* w trakcie ruchu: poziom docelowy (od razu widać tick) */
+	v->level_max = VOL_LEVELS - 1;
+	v->host_level = hostLevel;
+	v->host_percent = VOL_LevelPercent( hostLevel );
+	v->busy = USB_VolBusy();
+	v->mute = v->busy ? ( v->level == 0 ) : USB_IsMuted();
+	v->ctrl_count = USB_GetHostCtrlCount();
+}
+// ----------------------------------------------------------------------------------------------------
+static void srcGetStats( AUDIO_SrcStats_t * s ) {
+	USB_Stats_t u;
+
+	USB_GetStats( &u );
+	s->packets = u.packets;
+	s->bytes = u.bytes;
+	s->short_writes = u.short_writes;
+	s->age_ms = USB_GetPacketAgeMs();
+}
+// ----------------------------------------------------------------------------------------------------
+const AUDIO_Source_t AUDIO_SRC_USB = {
+	"USB",
+	srcInit,
+	srcPoll,
+	srcGetVolume,
+	USB_VolStep,
+	USB_HidMuteToggle,
+	USB_HidMediaKey,
+	srcGetStats
+};
 // ==============================================================================================================

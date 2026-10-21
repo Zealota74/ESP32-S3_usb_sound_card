@@ -9,29 +9,15 @@ SimonEncoder::SimonEncoder(uint8_t pinA, uint8_t pinB, EncoderType type, Acceler
     _lastEventTime = 0; _thisEventTime = 0;
     _old_s = 0;
     _cbRight = nullptr; _cbLeft = nullptr;
-    _timerHandle = nullptr;
 }
 
-void SimonEncoder::timerCallback(void* arg) {
-    reinterpret_cast<SimonEncoder*>(arg)->tick();
-}
-
-void SimonEncoder::begin(uint32_t interval_us) {
+void SimonEncoder::begin() {
     pinMode(_pinA, INPUT_PULLUP);
     pinMode(_pinB, INPUT_PULLUP);
     _old_s = (digitalRead(_pinA) ? 1 : 0) | (digitalRead(_pinB) ? 2 : 0);
-
-    const esp_timer_create_args_t timer_args = {
-        .callback = &SimonEncoder::timerCallback,
-        .arg = this,
-        .name = "simon_enc_timer"
-    };
-    if (esp_timer_create(&timer_args, &_timerHandle) == ESP_OK) {
-        esp_timer_start_periodic(_timerHandle, interval_us);
-    }
 }
 
-// Działa w tasku esp_timer (rdzeń 0), a eventAnalyze() w loop() (rdzeń 1),
+// Działa w kontekście timera (ISR), a eventAnalyze() w loop(),
 // dlatego wspólny licznik _pending jest modyfikowany operacjami atomowymi.
 void SimonEncoder::tick() {
     uint8_t s = (digitalRead(_pinA) ? 1 : 0) | (digitalRead(_pinB) ? 2 : 0);

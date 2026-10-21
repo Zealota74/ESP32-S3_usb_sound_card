@@ -1,14 +1,17 @@
 /*
- * usb_soundcard.h - odbiór audio z USB (UAC 1.0, ESP32-S3 TinyUSB)
+ * usb_soundcard.h - źródło audio: USB (UAC 1.0, ESP32-S3 TinyUSB)
  *
- * Moduł odbiera pakiety PCM od hosta i wpisuje je do podanego FIFO.
- * Nic nie wie o I2S ani o DAC-u.
+ * Moduł odbiera pakiety PCM od hosta i przekazuje je funkcją push (AUDIO_Push)
+ * podaną w USB_Init(). Nic nie wie o FIFO, I2S ani o DAC-u.
+ * Dla reszty projektu jest widoczny jako obiekt AUDIO_SRC_USB (audio_source.h),
+ * a funkcje USB_* i VOL_* są jego szczegółem implementacyjnym.
  */
 #ifndef USB_SOUNDCARD_H
 #define USB_SOUNDCARD_H
 
 #include <stdint.h>
-#include "fifo.h"
+#include "audio_types.h"
+#include "audio_source.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -42,12 +45,12 @@ typedef struct {
 } USB_Stats_t;
 
 /*
- * Uruchamia urządzenie USB Audio. Odebrane dane trafiają do rx_fifo.
+ * Uruchamia urządzenie USB Audio. Odebrane dane są przekazywane funkcją push.
  * Przed podłączeniem do hosta ustawia początkową głośność (dB, master),
  * żeby po starcie nie grało na 0 dB. Zwraca 1, gdy biblioteka przyjęła tę
  * wartość (odczyt zwrotny się zgadza), inaczej 0.
  */
-int      USB_Init(FIFO_t *rx_fifo, int8_t initial_vol_db);
+int      USB_Init(AUDIO_PushFn push, int8_t initial_vol_db);
 
 /* Ile razy host zmienił głośność lub mute od startu (zdarzenia biblioteki).
  * Rośnie nawet wtedy, gdy host wyśle tę samą wartość. */
@@ -84,6 +87,8 @@ void     USB_HidPoll(void);
 /* Ile kroków czeka jeszcze na wysłanie (0 = wszystkie wysłane). */
 int32_t  USB_HidPending(void);
 void     USB_HidMuteToggle(void);
+/* Następny / poprzedni utwór w Windows (HID Consumer: Scan Next/Previous Track). */
+void     USB_HidMediaKey(AUDIO_MediaKey_t key);
 
 /* ---------------------------------------------------------------------------
  * Poziomy głośności: jeden tick enkodera = jeden poziom.

@@ -22,7 +22,7 @@ extern "C" {
 #define CS_OLED         42
 #define DC_OLED         2
 #define RESET_OLED      40
-#define OLED_SPI_HZ     4000000UL
+#define OLED_SPI_HZ     8000000UL
 
 void UI_Init(void);
 
@@ -42,6 +42,19 @@ void UI_SetHostDb(int host_db);
 
 /* Pokazuje na ekranie, że działa startowe ograniczenie głośności (limit). */
 void UI_SetGuard(int active, float limit_db);
+
+/* Jasność wyświetlacza: poziomy 0..UI_BRIGHT_LEVELS-1 (krzywa kwadratowa,
+ * poziom 0 jest przyciemniony, ale ekran nie gaśnie całkiem).
+ * Wołać z tego samego wątku co UI_Loop() (loop). */
+#ifndef UI_BRIGHT_LEVELS
+#define UI_BRIGHT_LEVELS   16
+#endif
+#ifndef UI_BRIGHT_DEFAULT
+#define UI_BRIGHT_DEFAULT  8
+#endif
+void UI_SetBrightness(int level);
+void UI_BrightnessStep(int steps);   /* + jaśniej, - ciemniej, z ograniczeniem do zakresu */
+int  UI_GetBrightness(void);
 
 /* Wołaj z loop(); sama decyduje, czy trzeba przerysować. */
 void UI_Loop(uint32_t now_ms);

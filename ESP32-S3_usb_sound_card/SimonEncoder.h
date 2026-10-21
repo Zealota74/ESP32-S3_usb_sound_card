@@ -2,7 +2,6 @@
 #define SIMON_ENCODER_H
 
 #include <Arduino.h>
-#include "esp_timer.h"
 
 // Callback przyjmuje 'delta' (o ile zmienić wartość), zawsze > 0;
 // kierunek wynika z tego, który callback (Right/Left) został wywołany.
@@ -14,10 +13,18 @@ enum AccelerationMode {
 
 enum EncoderType { FULL_STEP = 4, HALF_STEP = 2, QUARTER_STEP = 1 };
 
+/*
+ * Enkoder kwadraturowy bez własnego timera.
+ * tick() próbkuje piny i ma być wołany cyklicznie z zewnątrz (moduł input:
+ * wspólny timer, kontekst przerwania, ok. 2 kHz). Wywołuje tylko atomowe
+ * operacje i digitalRead(), więc jest bezpieczny w ISR.
+ * eventAnalyze() wołaj z loop(): dopiero tam wywołują się callbacki.
+ */
 class SimonEncoder {
 public:
     SimonEncoder(uint8_t pinA, uint8_t pinB, EncoderType type = FULL_STEP, AccelerationMode acc = ACCEL_MEDIUM);
-    void begin(uint32_t interval_us = 500);
+    void begin();          // tylko konfiguracja pinów i stanu początkowego
+    void tick();           // próbkowanie pinów (z timera/ISR)
     void eventAnalyze();   // wołać z loop(): wywołuje callbacki
 
     void attachOnRight(EncoderCallback fn);
@@ -29,9 +36,6 @@ public:
     void setAcceleration(AccelerationMode mode);
 
 private:
-    static void timerCallback(void* arg);
-    void tick();
-
     uint8_t _pinA, _pinB;
     EncoderType _type;
     AccelerationMode _accMode;
@@ -48,7 +52,6 @@ private:
     EncoderCallback _cbRight;
     EncoderCallback _cbLeft;
 
-    esp_timer_handle_t _timerHandle;
     static const int8_t _enc_states[];
 };
 

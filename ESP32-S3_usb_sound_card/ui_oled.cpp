@@ -21,15 +21,41 @@ static volatile int s_hostDb = 0;
 static volatile int s_guard = 0;
 static volatile float s_guardDb = 0.0f;
 static volatile int s_calib = -1;
+static int s_bright = UI_BRIGHT_DEFAULT;
 
 // =============================================================================================
+static void applyBrightness( void ) {
+	/* krzywa kwadratowa (oko reaguje nieliniowo); poziom 0 = kontrast 4, ostatni = 255 */
+	int top = UI_BRIGHT_LEVELS - 1;
+	int c = 4 + ( s_bright * s_bright * 251 ) / ( top * top );
+
+	u8g2.setContrast( (uint8_t)c );
+}
+// ---------------------------------------------------------------------------------------------
 void UI_Init( void ) {
 	SPI.begin( SPI_SCK_OLED, SPI_MISO_OLED, SPI_MOSI_OLED );
 	u8g2.begin();
 #ifdef OLED_SPI_HZ
   u8g2.setBusClock(OLED_SPI_HZ);
 #endif
+	applyBrightness();
 	s_dirty = 1;
+}
+// ---------------------------------------------------------------------------------------------
+void UI_SetBrightness( int level ) {
+	if ( level < 0 ) level = 0;
+	if ( level > UI_BRIGHT_LEVELS - 1 ) level = UI_BRIGHT_LEVELS - 1;
+	if ( level == s_bright ) return;
+	s_bright = level;
+	applyBrightness();
+}
+// ---------------------------------------------------------------------------------------------
+void UI_BrightnessStep( int steps ) {
+	UI_SetBrightness( s_bright + steps );
+}
+// ---------------------------------------------------------------------------------------------
+int UI_GetBrightness( void ) {
+	return s_bright;
 }
 // ---------------------------------------------------------------------------------------------
 void UI_SetVolume( int value, int max, int mute ) {
