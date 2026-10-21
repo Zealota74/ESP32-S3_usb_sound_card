@@ -7,14 +7,19 @@
  *  ten plik         - I2S/PCM5102, task audio, diagnostyka
  ***************************************************************************/
 #include <Arduino.h>
+#include <math.h>
+#include "esp_system.h"
 #include "driver/i2s_std.h"
 #include "driver/gpio.h"
 
-#include "simon_defines.h"   /* oled_encoder_init/loop, oled_audioBlock, oled_fifo, oled_usbPackets */
+#include "simon_defines.h"   /* piny OLED i enkodera */
 #include "audio_config.h"
 #include "fifo.h"
 #include "drift.h"
 #include "usb_soundcard.h"
+#include "input.h"
+#include "ui_oled.h"
+#include "volume.h"
 
 /***************************************************************************
  *                              KONFIGURACJA
@@ -31,9 +36,18 @@
 #define FIFO_SIZE_BYTES     16384                   /* potęga 2, ok. 93 ms */
 #define FIFO_TARGET_BYTES   (FIFO_SIZE_BYTES / 2)   /* punkt pracy i próg startu */
 
-#define AUDIO_DIAG_SERIAL   1        /* 0 = wyłącz diagnostykę na Serial */
+#define AUDIO_DIAG_SERIAL   0        /* 1 = co sekundę statystyki audio na Serial (USB/FIFO fps, FIFO %) */
+#define VOL_DIAG_SERIAL     0        /* 1 = log "VOL host=... eff=..." przy zmianie głośności */
 #define DIAG_PERIOD_MS      1000
 #define OLED_PERIOD_MS      100
+#define VOL_PERIOD_MS       50
+
+/* Głośność po starcie, w dB efektywnych (wzmocnienie w torze audio, 0 dB = pełna).
+ * W bibliotece USB ustawiana jest odpowiadająca jej wartość hosta (przed
+ * podłączeniem do hosta). Jeśli biblioteka jej nie przyjmie, ta sama wartość
+ * działa jako awaryjny limit do pierwszej zmiany głośności z Windows lub dwuklika. */
+#define STARTUP_EFF_DB      (-20)
+#define STARTUP_VOL_DB      (STARTUP_EFF_DB * (-VOL_HOST_MIN_DB) / VOL_EFF_RANGE_DB)
 
 /***************************************************************************
  *                              STAN GLOBALNY
@@ -50,6 +64,9 @@ static volatile uint32_t g_i2sErrors = 0;
 static volatile uint32_t g_fifoMin = 0xFFFFFFFFUL;
 static volatile uint32_t g_fifoMax = 0;
 static volatile bool     g_playing = false;
+static volatile bool     g_guardActive = true;
+static volatile float    g_gainTarget = 0.0f;   /* mnożnik głośności (cisza do pierwszego odczytu) */
+static volatile int32_t  g_guardGainQ15 = 32768;
 
 /***************************************************************************
  *                    I2S -> PCM5102
@@ -123,7 +140,28 @@ static void i2sTask(void *arg)
     }
     g_playing = playing;
 
-    USB_ApplyVolume((uint8_t *)out, I2S_BLOCK_BYTES);
+    {                                       /* głośność: mnożnik z rampą w obrębie bloku (bez trzasków) */
+      static float gPrev = 0.0f;
+      float gNew = g_gainTarget;
+
+      if (!(gPrev == 1.0f && gNew == 1.0f)) {
+        float step = (gNew - gPrev) / (float)I2S_BLOCK_FRAMES;
+        float g = gPrev;
+        for (uint32_t k = 0; k < I2S_BLOCK_FRAMES; k++) {
+          g += step;
+          out[k * 2]     = (int16_t)lrintf((float)out[k * 2] * g);
+          out[k * 2 + 1] = (int16_t)lrintf((float)out[k * 2 + 1] * g);
+        }
+      }
+      gPrev = gNew;
+    }
+
+    if (g_guardActive) {                    /* startowe ograniczenie głośności */
+      int32_t gq = g_guardGainQ15;
+      for (uint32_t k = 0; k < I2S_BLOCK_FRAMES * 2; k++) {
+        out[k] = (int16_t)(((int32_t)out[k] * gq) >> 15);
+      }
+    }
 
     if (i2s_channel_write(g_txHandle, out, I2S_BLOCK_BYTES, &written, portMAX_DELAY) != ESP_OK) {
       g_i2sErrors++;
@@ -177,15 +215,45 @@ static void diagPrint(uint32_t now)
 #endif
 
 /***************************************************************************
+ *                    CALLBACKI WEJŚĆ (enkoder / przycisk)
+ ***************************************************************************/
+static void onEncRotate(int steps)     { USB_HidVolumeStep(steps); }   /* głośność Windows */
+static void onBtnClick(void)           { USB_HidMuteToggle(); }
+static void onBtnLongPress(void)       { UI_ToggleDebug(); }           /* ekran diagnostyczny */
+static void onBtnDoubleClick(void)     { g_guardActive = false; UI_SetGuard(0, 0.0f); }  /* zwolnij limit */
+
+/***************************************************************************
  *                              SETUP / LOOP
  ***************************************************************************/
+/* Powód ostatniego restartu (diagnostyka resetów przy kręceniu głośnością) */
+static const char *resetReasonStr(esp_reset_reason_t r)
+{
+  switch (r) {
+    case ESP_RST_POWERON:   return "POWERON (zasilanie)";
+    case ESP_RST_SW:        return "SW (esp_restart)";
+    case ESP_RST_PANIC:     return "PANIC (wyjątek / abort)";
+    case ESP_RST_INT_WDT:   return "INT_WDT (watchdog przerwań)";
+    case ESP_RST_TASK_WDT:  return "TASK_WDT (watchdog tasku)";
+    case ESP_RST_WDT:       return "WDT (inny watchdog)";
+    case ESP_RST_BROWNOUT:  return "BROWNOUT (spadek zasilania)";
+    case ESP_RST_EXT:       return "EXT (reset zewnętrzny)";
+    case ESP_RST_DEEPSLEEP: return "DEEPSLEEP";
+    default:                return "INNY/NIEZNANY";
+  }
+}
+
 void setup()
 {
   Serial.begin(115200);
   delay(1000);
   Serial.println("ESP32-S3 USB AUDIO DAC (PCM5102)");
+  Serial.printf("Reset reason: %s\n", resetReasonStr(esp_reset_reason()));
 
-  oled_encoder_init();
+  UI_Init();
+  INPUT_init();
+  INPUT_attach_rotate(onEncRotate);
+  INPUT_attach_action(onBtnClick);
+  INPUT_attach_long_press(onBtnLongPress);
 
   if (!FIFO_Init(&g_fifo, g_fifoStorage, FIFO_SIZE_BYTES, AUDIO_BYTES_PER_FRAME) ||
       !DRIFT_Init(&g_drift, &g_fifo, FIFO_TARGET_BYTES)) {
@@ -197,7 +265,11 @@ void setup()
     for (;;) delay(1000);
   }
 
-  USB_Init(&g_fifo);
+  /* głośność startowa: biblioteka USB, a przy niepowodzeniu awaryjny limit w torze audio */
+  g_guardGainQ15 = (int32_t)(powf(10.0f, (float)STARTUP_EFF_DB / 20.0f) * 32768.0f);
+  g_guardActive = !USB_Init(&g_fifo, (int8_t)STARTUP_VOL_DB);
+  UI_SetGuard(g_guardActive ? 1 : 0, (float)STARTUP_EFF_DB);
+  if (g_guardActive) INPUT_attach_double_click(onBtnDoubleClick);   /* dwuklik zwalnia awaryjny limit */
 
   xTaskCreatePinnedToCore(i2sTask, "I2S", 4096, NULL, configMAX_PRIORITIES - 1, NULL, 1);
   Serial.println("System ready");
@@ -205,21 +277,55 @@ void setup()
 
 void loop()
 {
-  static uint32_t tOled = 0;
+  static uint32_t tOled = 0, tVol = 0;
   uint32_t now = millis();
 
-  oled_encoder_loop();
+  INPUT_proc();                                 /* enkoder + przyciski (callbacki) */
+  USB_HidPoll();                                /* wysyła zaległe kroki głośności */
+  USB_DebugPoll();                              /* log zdarzeń volume/mute od hosta (diagnostyka) */
+  while (Serial.available()) {                 /* komendy diagnostyczne: 'd' = zrzut tabeli głośności, 'c' = wyczyść */
+    int ch = Serial.read();
+    if (ch == 'd') USB_DebugDump();
+    else if (ch == 'c') USB_DebugClear();
+  }
+
+  if (now - tVol >= VOL_PERIOD_MS) {
+    tVol = now;
+    if (g_guardActive && USB_GetHostCtrlCount() > 0) {   /* host odezwał się: zwolnij limit */
+      g_guardActive = false;
+      UI_SetGuard(0, 0.0f);
+    }
+    {
+      float host = USB_GetVolumeDb();
+      int muted = USB_IsMuted();
+      float eff = VOL_HostToEffDb(host);
+
+      g_gainTarget = muted ? 0.0f : VOL_DbToGain(eff);
+#if VOL_DIAG_SERIAL
+      {
+        static int lastHost = 12345, lastMute = -1;
+        if ((int)host != lastHost || muted != lastMute) {   /* log przy każdej zmianie głośności */
+          lastHost = (int)host;
+          lastMute = muted;
+          Serial.printf("VOL host=%d dB eff=%.1f dB mute=%d\n", (int)host, (double)eff, muted);
+        }
+      }
+#endif
+      UI_SetVolume(eff, muted);
+      UI_SetHostDb((int)host);
+    }
+  }
 
   if (now - tOled >= OLED_PERIOD_MS) {
     USB_Stats_t u;
     tOled = now;
     USB_GetStats(&u);
-    oled_audioBlock = g_i2sBlocks;
-    oled_fifo = FIFO_Available(&g_fifo);
-    oled_usbPackets = u.packets;
+    UI_SetDebug(g_i2sBlocks, FIFO_Available(&g_fifo), u.packets);
   }
+  UI_Loop(now);
 
 #if AUDIO_DIAG_SERIAL
   diagPrint(now);
 #endif
+  delay(1);
 }
