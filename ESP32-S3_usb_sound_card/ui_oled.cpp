@@ -213,7 +213,7 @@ static void drawStat( void ) {
 /* ---- warstwa dolna: SPECTRUM (słupki na całej szerokości 256 px, wysokość 64 px) ---- */
 static void drawSpectrum( void ) {
 	int n = s_specBars;
-	int gap = ( n <= 8 ) ? 4 : ( ( n <= 16 ) ? 3 : 2 );
+	int gap = ( n <= 8 ) ? 4 : ( ( n <= 16 ) ? 3 : ( ( n <= 32 ) ? 2 : 1 ) ); /* 64 słupki: 3 px + 1 px przerwy */
 	int bw = ( 256 - ( n - 1 ) * gap ) / n;
 	int x0 = ( 256 - ( n * bw + ( n - 1 ) * gap ) ) / 2;
 

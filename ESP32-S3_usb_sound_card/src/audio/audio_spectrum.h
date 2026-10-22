@@ -16,7 +16,7 @@
 extern "C" {
 #endif
 
-#define SPEC_MAX_BARS   32
+#define SPEC_MAX_BARS   64
 
 void SPEC_Init(uint32_t sample_rate);
 

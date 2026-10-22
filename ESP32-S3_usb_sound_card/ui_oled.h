@@ -72,7 +72,7 @@ void UI_SetHostDb(int host_db);
 
 /* Analizator widma: poziomy i szczyty 0..255 dla 'bars' słupków (1..UI_SPEC_MAX_BARS).
  * Wołać po każdej nowej ramce widma. */
-#define UI_SPEC_MAX_BARS   32
+#define UI_SPEC_MAX_BARS   64   /* musi być równe AUDIO_SPECTRUM_MAX_BARS */
 void UI_SetSpectrum(const uint8_t *level, const uint8_t *peak, int bars);
 
 /* Ogólne OSD: title (maks. 19 znaków), value (maks. 15 znaków) wyświetlana dużą czcionką,

@@ -81,7 +81,7 @@ void AUDIO_GuardRelease(void);
 
 /* Analizator widma. Liczony w AUDIO_Poll() (czyli w loop()), tylko gdy włączony.
  * Próbki pochodzą z toru audio przed regulacją głośności, więc widmo nie zależy od poziomu. */
-#define AUDIO_SPECTRUM_MAX_BARS  32
+#define AUDIO_SPECTRUM_MAX_BARS  64
 
 typedef struct {
   uint8_t  bars;                              /* liczba słupków: 7, 16 lub 32 */

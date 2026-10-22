@@ -276,7 +276,7 @@ int AUDIO_SpectrumGetBars( void ) {
 }
 // ---------------------------------------------------------------------------------------------
 void AUDIO_SpectrumCycleBars( int dir ) {
-	static const int opts[] = { 7, 16, 32 };
+	static const int opts[] = { 7, 16, 32, 64 };
 	const int n = (int)( sizeof( opts ) / sizeof( opts[ 0 ] ) );
 	int cur = SPEC_GetBars();
 	int idx = 1;
