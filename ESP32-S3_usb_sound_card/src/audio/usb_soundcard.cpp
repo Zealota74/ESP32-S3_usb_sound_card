@@ -27,6 +27,10 @@ static volatile uint32_t s_bytes = 0;
 static volatile uint32_t s_shortWrites = 0;
 static volatile uint32_t s_lastPacketMs = 0;
 static volatile uint32_t s_hostCtrl = 0;
+static volatile uint32_t s_hostRate = AUDIO_SAMPLE_RATE_DEFAULT;   /* częstotliwość wybrana przez hosta */
+
+/* Lista częstotliwości ogłaszanych hostowi jest w USBAudioCard.cpp (USB_UAC1_RATES): ta kopia biblioteki
+ * w projekcie dodaje wiele częstotliwości do deskryptora UAC1. Lista musi zgadzać się z AUDIO_SAMPLE_RATE_LIST. */
 
 #if USB_DEBUG_EVENTS
 /* Kolejka zdarzeń do wypisania: callback tylko zapisuje wpis (bez printf!),
@@ -78,6 +82,12 @@ static void usbRxCallback( void * data, uint16_t len ) {
 static void uacEventCb( void * arg, esp_event_base_t base, int32_t id, void * data ) {
 	(void)arg;
 	(void)base;
+
+	if ( id == ARDUINO_USB_AUDIO_CARD_SAMPLE_RATE_EVENT ) { /* nie zalicza się do licznika głośności/mute */
+		arduino_usb_audio_card_event_data_t * r = (arduino_usb_audio_card_event_data_t*)data;
+		if ( r != NULL ) s_hostRate = (uint32_t)r->sample_rate.rate;
+		return;
+	}
 	s_hostCtrl++;
 
 #if USB_DEBUG_EVENTS
@@ -192,6 +202,7 @@ int USB_Init( AUDIO_PushFn push, int8_t initial_vol_db ) {
 
 	s_uac.onEvent( ARDUINO_USB_AUDIO_CARD_VOLUME_EVENT, uacEventCb );
 	s_uac.onEvent( ARDUINO_USB_AUDIO_CARD_MUTE_EVENT, uacEventCb );
+	s_uac.onEvent( ARDUINO_USB_AUDIO_CARD_SAMPLE_RATE_EVENT, uacEventCb );
 	delay( 30 ); /* ewentualne zdarzenia z lokalnego ustawienia zdążą się wyczyścić */
 	s_hostCtrl = 0; /* od teraz liczymy tylko zmiany od hosta */
 
@@ -201,6 +212,10 @@ int USB_Init( AUDIO_PushFn push, int8_t initial_vol_db ) {
 // ---------------------------------------------------------------------------------------------
 uint32_t USB_GetHostCtrlCount( void ) {
 	return s_hostCtrl;
+}
+// ---------------------------------------------------------------------------------------------
+uint32_t USB_GetSampleRate( void ) {
+	return s_hostRate;
 }
 // ---------------------------------------------------------------------------------------------
 void USB_ApplyVolume( uint8_t * data, uint32_t bytes ) {
@@ -471,6 +486,7 @@ const AUDIO_Source_t AUDIO_SRC_USB = {
 	USB_VolStep,
 	USB_HidMuteToggle,
 	USB_HidMediaKey,
-	srcGetStats
+	srcGetStats,
+	USB_GetSampleRate
 };
 // ==============================================================================================================

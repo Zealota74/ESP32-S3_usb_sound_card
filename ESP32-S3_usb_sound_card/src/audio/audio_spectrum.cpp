@@ -121,6 +121,14 @@ void SPEC_Init( uint32_t sample_rate ) {
 	SPEC_Reset();
 }
 // ---------------------------------------------------------------------------------------------
+void SPEC_SetRate( uint32_t sample_rate ) {
+	if ( sample_rate == 0 || sample_rate == s_fs ) return;
+	s_fs = sample_rate;
+	computeFall();
+	buildBands();
+	SPEC_Reset();
+}
+// ---------------------------------------------------------------------------------------------
 void SPEC_Feed( const int16_t * stereo, uint32_t frames ) {
 	uint32_t wr = s_wr;
 

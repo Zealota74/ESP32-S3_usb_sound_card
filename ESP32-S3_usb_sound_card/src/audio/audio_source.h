@@ -36,6 +36,11 @@ typedef struct {
   void (*media_key)(AUDIO_MediaKey_t key);
 
   void (*get_stats)(AUDIO_SrcStats_t *s);
+
+  /* Bieżąca częstotliwość próbkowania strumienia (Hz), np. wybrana przez hosta USB.
+   * Odpytywane z AUDIO_Poll(). NULL = źródło zawsze dostarcza AUDIO_SAMPLE_RATE_DEFAULT.
+   * Wartość spoza AUDIO_SAMPLE_RATE_LIST jest ignorowana. */
+  uint32_t (*get_sample_rate)(void);
 } AUDIO_Source_t;
 
 /* Dostępne źródła (definiowane w ich plikach, wybór w audio_config.h). */

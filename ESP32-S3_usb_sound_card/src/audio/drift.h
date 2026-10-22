@@ -55,6 +55,10 @@ typedef struct {
 /* Zwraca 1 przy sukcesie, 0 gdy fifo->frame_bytes != 4 lub błędne parametry. */
 int      DRIFT_Init(DRIFT_t *d, FIFO_t *fifo, uint32_t target_bytes);
 
+/* Zmienia poziom docelowy FIFO (np. po zmianie częstotliwości próbkowania).
+ * Wołać z wątku konsumenta, przed DRIFT_Start(). */
+void     DRIFT_SetTarget(DRIFT_t *d, uint32_t target_bytes);
+
 /* Wywołaj przed rozpoczęciem grania (po prefillu i po każdym underrunie). */
 void     DRIFT_Start(DRIFT_t *d);
 

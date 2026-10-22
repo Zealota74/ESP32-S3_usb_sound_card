@@ -46,6 +46,7 @@ typedef struct {
   uint32_t consumed_frames;    /* ramki zdjęte z FIFO od startu */
   uint32_t fft_us;             /* czas ostatniej FFT widma (0 = jeszcze nie liczona) */
   int32_t  drift_ppm;          /* bieżąca korekta tempa (0 poza odtwarzaniem) */
+  uint32_t sample_rate;        /* bieżąca częstotliwość próbkowania wyjścia (Hz) */
   AUDIO_SrcStats_t src;        /* statystyki źródła */
 } AUDIO_Stats_t;
 
@@ -55,6 +56,10 @@ const char * AUDIO_ErrorText(int err);
 
 /* Wołaj z loop() w każdym przebiegu (nieblokująco). now_ms = millis(). */
 void AUDIO_Poll(uint32_t now_ms);
+
+/* Bieżąca częstotliwość próbkowania toru (Hz). Zmienia się, gdy źródło (host USB) wybierze inny format;
+ * lista obsługiwanych częstotliwości: AUDIO_SAMPLE_RATE_LIST w audio_config.h. */
+uint32_t AUDIO_GetSampleRate(void);
 
 /* Wejście danych dla źródeł (producent FIFO, dokładnie jeden). Źródła dostają
  * ten wskaźnik w init(), program główny go nie używa. */

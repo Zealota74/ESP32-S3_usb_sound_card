@@ -19,6 +19,11 @@ int DRIFT_Init(DRIFT_t *d, FIFO_t *fifo, uint32_t target_bytes)
   return 1;
 }
 
+void DRIFT_SetTarget(DRIFT_t *d, uint32_t target_bytes)
+{
+  if (target_bytes != 0) d->target_bytes = target_bytes;
+}
+
 void DRIFT_Start(DRIFT_t *d)
 {
   d->prev[0] = d->prev[1] = 0;

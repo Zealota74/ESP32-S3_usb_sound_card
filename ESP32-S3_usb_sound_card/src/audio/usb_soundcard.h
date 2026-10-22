@@ -52,6 +52,10 @@ typedef struct {
  */
 int      USB_Init(AUDIO_PushFn push, int8_t initial_vol_db);
 
+/* Częstotliwość próbkowania wybrana przez hosta (Hz); do pierwszego wyboru AUDIO_SAMPLE_RATE_DEFAULT.
+ * Aktualizowana ze zdarzenia biblioteki (ARDUINO_USB_AUDIO_CARD_SAMPLE_RATE_EVENT). */
+uint32_t USB_GetSampleRate(void);
+
 /* Ile razy host zmienił głośność lub mute od startu (zdarzenia biblioteki).
  * Rośnie nawet wtedy, gdy host wyśle tę samą wartość. */
 uint32_t USB_GetHostCtrlCount(void);

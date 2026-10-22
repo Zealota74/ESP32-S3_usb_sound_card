@@ -23,6 +23,10 @@ void SPEC_Init(uint32_t sample_rate);
 /* Producent: ramki stereo int16 (L,R,L,R...), zapisywane jako mono (L+R)/2. */
 void SPEC_Feed(const int16_t *stereo, uint32_t frames);
 
+/* Zmiana częstotliwości próbkowania w czasie pracy: przelicza pasma i czas opadania, zeruje słupki.
+ * Wołać z tego samego wątku co SPEC_Process() (loop). */
+void SPEC_SetRate(uint32_t sample_rate);
+
 /* Liczba słupków 1..SPEC_MAX_BARS (używane: 7, 16, 32). Zmiana zeruje słupki. */
 void SPEC_SetBars(int bars);
 int  SPEC_GetBars(void);

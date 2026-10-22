@@ -53,6 +53,9 @@ uint32_t FIFO_Write(FIFO_t *f, const uint8_t *data, uint32_t bytes);
 /* Konsument. Zwraca liczbę odczytanych bajtów (może być mniej niż bytes). */
 uint32_t FIFO_Read(FIFO_t *f, uint8_t *data, uint32_t bytes);
 
+/* Konsument: odrzuca całą zawartość (rd = wr). Wołać z tego samego wątku co FIFO_Read(). */
+void     FIFO_Flush(FIFO_t *f);
+
 uint32_t FIFO_Available(const FIFO_t *f);   /* bajty do odczytu */
 uint32_t FIFO_GetOverruns(const FIFO_t *f);
 

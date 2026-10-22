@@ -35,6 +35,7 @@ static i2s_chan_handle_t s_tx = NULL;
 static AUDIO_OutFillFn   s_fill = NULL;
 static void *            s_ctx = NULL;
 static uint32_t          s_blockFrames = 0;
+static uint32_t          s_sampleRate = 0;
 static volatile uint32_t s_errors = 0;
 static int16_t           s_buf[ AUDIO_BLOCK_FRAMES * 2 ];
 
@@ -43,6 +44,7 @@ int AUDIO_OUT_Init( const AUDIO_OutConfig_t * cfg ) {
 	if ( cfg == NULL || cfg->channels != 2 || cfg->bits != 16 ) return 0;
 	if ( cfg->block_frames == 0 || cfg->block_frames > AUDIO_BLOCK_FRAMES ) return 0;
 	s_blockFrames = cfg->block_frames;
+	s_sampleRate = cfg->sample_rate;
 
 	i2s_chan_config_t chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG( I2S_NUM_AUTO, I2S_ROLE_MASTER );
 	chan_cfg.dma_desc_num  = AUDIO_I2S_DMA_DESC_NUM;
@@ -82,6 +84,35 @@ int AUDIO_OUT_Init( const AUDIO_OutConfig_t * cfg ) {
 		return 0;
 	}
 	return 1;
+}
+// ---------------------------------------------------------------------------------------------
+/* Kanał musi być wyłączony (stan INIT). Zegar jak w AUDIO_OUT_Init (PLL 160 MHz, MCLK = 256 * fs). */
+static int setClock( uint32_t rate ) {
+	i2s_std_clk_config_t clk = I2S_STD_CLK_DEFAULT_CONFIG( rate );
+
+	clk.clk_src       = I2S_CLK_SRC_PLL_160M;
+	clk.mclk_multiple = I2S_MCLK_MULTIPLE_256;
+	return ( i2s_channel_reconfig_std_clock( s_tx, &clk ) == ESP_OK ) ? 1 : 0;
+}
+// ---------------------------------------------------------------------------------------------
+int AUDIO_OUT_SetSampleRate( uint32_t rate ) {
+	int ok;
+
+	if ( s_tx == NULL || rate == 0 ) return 0;
+	if ( rate == s_sampleRate ) return 1;
+
+	if ( i2s_channel_disable( s_tx ) != ESP_OK ) return 0;
+	ok = setClock( rate );
+	if ( ok ) {
+		s_sampleRate = rate;
+	} else {
+		setClock( s_sampleRate ); /* wróć do poprzedniej, żeby wyjście nie zostało bez zegara */
+	}
+	if ( i2s_channel_enable( s_tx ) != ESP_OK ) {
+		s_errors++;
+		return 0;
+	}
+	return ok;
 }
 // ---------------------------------------------------------------------------------------------
 /* Bez Serial.print i innych operacji blokujących! */

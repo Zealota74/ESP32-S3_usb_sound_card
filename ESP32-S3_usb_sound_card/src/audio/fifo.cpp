@@ -72,6 +72,13 @@ uint32_t FIFO_Read( FIFO_t * f, uint8_t * data, uint32_t bytes ) {
 	return bytes;
 }
 
+void FIFO_Flush( FIFO_t * f ) {
+	uint32_t wr = f->wr;
+
+	FIFO_MEMORY_BARRIER();
+	f->rd = wr; /* wr jest wielokrotnością ramki, więc rd też */
+}
+
 uint32_t FIFO_Available( const FIFO_t * f ) {
 	return f->wr - f->rd;
 }

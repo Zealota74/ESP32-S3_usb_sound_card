@@ -34,6 +34,12 @@ int      AUDIO_OUT_Init(const AUDIO_OutConfig_t *cfg);
 /* Uruchamia pompowanie danych (wywołuje fill() cyklicznie). Zwraca 1 przy sukcesie. */
 int      AUDIO_OUT_Start(AUDIO_OutFillFn fill, void *ctx);
 
+/* Zmienia częstotliwość próbkowania wyjścia w czasie pracy. Zwraca 1 przy sukcesie.
+ * Wołać wyłącznie z fill() (wątek wyjścia): wtedy nie ma równoległego zapisu do peryferium.
+ * To jedyny wyjątek od zasady "fill() nie blokuje": zmiana zegara trwa krótko i zdarza się
+ * tylko przy zmianie formatu. Po niepowodzeniu implementacja wraca do poprzedniej częstotliwości. */
+int      AUDIO_OUT_SetSampleRate(uint32_t sample_rate);
+
 /* Liczba błędów zapisu do peryferium od startu. */
 uint32_t AUDIO_OUT_GetErrors(void);
 

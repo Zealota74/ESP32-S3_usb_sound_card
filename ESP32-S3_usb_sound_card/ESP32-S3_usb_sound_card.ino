@@ -15,9 +15,9 @@
 /***************************************************************************
  *                              KONFIGURACJA
  ***************************************************************************/
-#define AUDIO_DIAG_SERIAL   0        /* 1 = co sekundę statystyki audio na Serial (źródło/FIFO fps, FIFO %) */
-#define VOL_DIAG_SERIAL     1        /* 1 = log "VOL host=... -> ...%" przy zmianie głośności */
-#define KEY_DIAG_SERIAL     1        /* 1 = log akcji klawiszy A-D / pilota na Serial */
+#define AUDIO_DIAG_SERIAL   1        /* 1 = co sekundę statystyki audio na Serial (źródło/FIFO fps, FIFO %) */
+#define VOL_DIAG_SERIAL     0        /* 1 = log "VOL host=... -> ...%" przy zmianie głośności */
+#define KEY_DIAG_SERIAL     0        /* 1 = log akcji klawiszy A-D / pilota na Serial */
 #define DIAG_PERIOD_MS      1000
 #define OLED_PERIOD_MS      100
 
@@ -75,6 +75,7 @@ void loop() {
 
 #if AUDIO_DIAG_SERIAL
 	diagPrint( now );
+  audioSTAT( now );
 #endif
 	delay( 1 );
 }
@@ -155,6 +156,18 @@ static void diagPrint( uint32_t now ) {
 		(unsigned long)s.src.short_writes,
 		(unsigned long)s.src.age_ms,
 		(unsigned long)s.out_errors );
+}
+void audioSTAT(uint32_t now) {
+static uint32_t t0 = 0, b0 = 0;
+// uint32_t now = millis();
+if (now - t0 >= 5000) {            // 5 s zamiast 1 s, mniejszy wpływ jittera
+  AUDIO_Stats_t s;
+  AUDIO_GetStats(&s, 0);
+  Serial.printf("fs=%lu blocks/s=%.1f\n", (unsigned long)s.sample_rate,
+                (s.blocks - b0) * 1000.0f / (now - t0));
+  b0 = s.blocks;
+  t0 = now;
+}
 }
 #endif
 // ========================================================================================
