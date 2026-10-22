@@ -1,0 +1,8 @@
+A modified source library from the ESP-IDF for USBAudioCard, enabling support for 48 kHz, 16-bit audio.
+The original code only supports 44.1 kHz, 16-bit audio.
+Unfortunately, higher formats require different hardware due to the limitations of the USB Full Speed ​​interface on the ESP32-S3.
+The file should be replaced within the path used by the Arduino environment:
+C:\Users\user_name\AppData\Local\Arduino15\packages\esp32\hardware\esp32\3.3.12\libraries\USB\src
+Please make sure to back up the original file in a safe location.
+If you reinstall the Espressif libraries, you will need to replace the file with this modified version again.
+
