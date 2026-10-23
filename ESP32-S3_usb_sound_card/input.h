@@ -27,10 +27,10 @@
 #define ENCODER_ACCEL     ACCEL_OFF
 
 /* ---- Przyciski KEY_A do KEY_D (-1 = nieużywany) ---- */
-#define KEY_A_PIN         7
-#define KEY_B_PIN         15
-#define KEY_C_PIN         16
-#define KEY_D_PIN         17
+#define KEY_A_PIN         16      // Right
+#define KEY_B_PIN         17      // Up
+#define KEY_C_PIN         7       // Left
+#define KEY_D_PIN         15      // Down
 #define KEY_ACTIVE        ACTIVE_LOW
 #define KEY_PULLUP        PULLUP_ENABLE
 

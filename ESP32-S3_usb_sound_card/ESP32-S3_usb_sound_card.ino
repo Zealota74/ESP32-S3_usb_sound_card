@@ -15,9 +15,9 @@
 /***************************************************************************
  *                              KONFIGURACJA
  ***************************************************************************/
-#define AUDIO_DIAG_SERIAL   1        /* 1 = co sekundę statystyki audio na Serial (źródło/FIFO fps, FIFO %) */
+#define AUDIO_DIAG_SERIAL   0        /* 1 = co sekundę statystyki audio na Serial (źródło/FIFO fps, FIFO %) */
 #define VOL_DIAG_SERIAL     0        /* 1 = log "VOL host=... -> ...%" przy zmianie głośności */
-#define KEY_DIAG_SERIAL     0        /* 1 = log akcji klawiszy A-D / pilota na Serial */
+#define KEY_DIAG_SERIAL     1        /* 1 = log akcji klawiszy A-D / pilota na Serial */
 #define DIAG_PERIOD_MS      1000
 #define OLED_PERIOD_MS      100
 

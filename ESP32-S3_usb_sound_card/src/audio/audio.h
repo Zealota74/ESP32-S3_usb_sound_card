@@ -44,7 +44,8 @@ typedef struct {
   uint32_t fifo_min;           /* minimum/maksimum poziomu od ostatniego skasowania */
   uint32_t fifo_max;
   uint32_t consumed_frames;    /* ramki zdjęte z FIFO od startu */
-  uint32_t fft_us;             /* czas ostatniej FFT widma (0 = jeszcze nie liczona) */
+  uint32_t fft_us;             /* czas silnika widma (FFT lub IIR) na jeden hop próbek AUDIO_SPECTRUM_HOP, us; średnia z ok. 0,5 s
+                                  (0 = jeszcze nie policzona). Budżet = hop / fs; obciążenie % = fft_us * fs / ( HOP * 1e4 ) */
   int32_t  drift_ppm;          /* bieżąca korekta tempa (0 poza odtwarzaniem) */
   uint32_t sample_rate;        /* bieżąca częstotliwość próbkowania wyjścia (Hz) */
   AUDIO_SrcStats_t src;        /* statystyki źródła */

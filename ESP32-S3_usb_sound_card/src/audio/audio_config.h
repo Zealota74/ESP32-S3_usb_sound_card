@@ -53,4 +53,20 @@
 #define AUDIO_SPECTRUM_PEAK_HOLD   20      /* ramki podtrzymania kreski szczytu */
 #define AUDIO_SPECTRUM_PEAK_FALL   4       /* opadanie kreski szczytu na ramkę */
 
+// Simon test
+// #define AUDIO_SPECTRUM_FFT_Q           -1.0f   /* 0 = jak dotąd, > 0 = Q, < 0 = auto */
+/* Silnik analizy pasm (przełączalny w czasie pracy: SPEC_SetEngine):
+ *   0 = FFT (jedna FFT, pasma = sumy binów; słaba rozdzielczość w basie),
+ *   1 = bank filtrów IIR (pasmowe biquady o stałym Q, rozdzielczość bez zmian w całym paśmie),
+ *   2 = bank IIR z decymacją oktawową (to samo co 1, ale tańszy przy dużej liczbie pasm). */
+#define AUDIO_SPECTRUM_ENGINE_DEFAULT  1
+/* Bank IIR: liczba kaskadowanych sekcji biquad na pasmo, 1..4 (1 = 2. rząd, -12 dB/okt; 2 = 4. rząd, -24 dB/okt).
+ * Krawędzie pasma (-3 dB) zostają w tym samym miejscu, zmienia się tylko stromość zboczy i koszt CPU. */
+#define AUDIO_SPECTRUM_IIR_SECTIONS    2
+/* Stała czasowa detektora energii: tau = max( TAU_MIN_MS, TAU_CYCLES / f0 ). Dla basu dłuższa (tłumi tętnienia 2*f0). */
+#define AUDIO_SPECTRUM_IIR_TAU_CYCLES  1.0f
+#define AUDIO_SPECTRUM_IIR_TAU_MIN_MS  10
+/* Korekta poziomu silnika IIR względem FFT (dB, + = wyżej). Bazowo szum biały daje ten sam poziom co FFT. */
+#define AUDIO_SPECTRUM_IIR_TRIM_DB     0.0f
+
 #endif /* AUDIO_CONFIG_H */

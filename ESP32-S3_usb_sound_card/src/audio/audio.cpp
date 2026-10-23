@@ -58,7 +58,9 @@ static volatile float s_guardGain = 1.0f;
 /* Widmo: liczone w loop (AUDIO_Poll), tylko gdy włączone. */
 static bool     s_specOn = false;
 static uint32_t s_specSeq = 0, s_specReadSeq = 0;
-static uint32_t s_fftUs = 0;
+static uint32_t s_fftUs = 0;                 /* czas silnika widma na jeden hop próbek (us), średnia z okna */
+static uint32_t s_fftAccUs = 0;              /* okno uśredniania: suma czasów SPEC_Process ... */
+static uint32_t s_fftAccN = 0;               /* ... i suma próbek audio, które objęły te wywołania */
 
 /* Cache głośności (odświeżany w AUDIO_Poll) i znacznik czasu ostatniego odświeżenia. */
 static AUDIO_Volume_t s_vol;
@@ -77,6 +79,12 @@ static bool rateSupported( uint32_t rate ) {
 		if ( kRates[ i ] == rate ) return true;
 	}
 	return false;
+}
+// ---------------------------------------------------------------------------------------------
+/* Zaczyna nowe okno pomiaru czasu widma (po zmianie liczby słupków, częstotliwości, włączeniu widma). */
+static void fftStatReset( void ) {
+	s_fftAccUs = 0;
+	s_fftAccN = 0;
 }
 // ---------------------------------------------------------------------------------------------
 uint32_t AUDIO_Push( const uint8_t * data, uint32_t bytes ) {
@@ -210,6 +218,7 @@ void AUDIO_Poll( uint32_t now_ms ) {
 	if ( s_rate != s_specRate ) {
 		s_specRate = s_rate;
 		SPEC_SetRate( s_specRate );
+		fftStatReset();
 	}
 
 	if ( s_src->get_volume != NULL && now_ms - s_tVol >= AUDIO_VOL_POLL_MS ) {
@@ -225,8 +234,16 @@ void AUDIO_Poll( uint32_t now_ms ) {
 	if ( s_specOn ) {
 		uint32_t t0 = AUDIO_OUT_TimeUs();
 		if ( SPEC_Process() ) {
-			s_fftUs = AUDIO_OUT_TimeUs() - t0;
+			/* Czas jednego wywołania zależy od zaległości próbek (silnik IIR liczy wszystkie próbki od ostatniego
+			 * wywołania, a okres loop() zmienia się z zapełnieniem ekranu), więc uśredniamy w oknie ok. 0,5 s
+			 * i normalizujemy do jednego hopa: us na AUDIO_SPECTRUM_HOP próbek. Budżet = hop / fs (np. 21,3 ms @48 kHz). */
+			s_fftAccUs += AUDIO_OUT_TimeUs() - t0;
+			s_fftAccN  += SPEC_GetLastBlock();
 			s_specSeq++;
+			if ( s_fftAccN >= s_rate / 2 ) {
+				s_fftUs = (uint32_t)( (uint64_t)s_fftAccUs * AUDIO_SPECTRUM_HOP / s_fftAccN );
+				fftStatReset();
+			}
 		}
 	}
 }
@@ -262,6 +279,7 @@ void AUDIO_GuardRelease( void ) {
 void AUDIO_SpectrumEnable( int on ) {
 	if ( on && !s_specOn ) {
 		SPEC_Reset();
+		fftStatReset();
 		s_specReadSeq = s_specSeq;
 	}
 	s_specOn = ( on != 0 );
@@ -269,6 +287,7 @@ void AUDIO_SpectrumEnable( int on ) {
 // ---------------------------------------------------------------------------------------------
 void AUDIO_SpectrumSetBars( int bars ) {
 	SPEC_SetBars( bars );
+	fftStatReset();
 }
 // ---------------------------------------------------------------------------------------------
 int AUDIO_SpectrumGetBars( void ) {
@@ -286,6 +305,7 @@ void AUDIO_SpectrumCycleBars( int dir ) {
 	}
 	idx = ( idx + ( dir >= 0 ? 1 : n - 1 ) ) % n;
 	SPEC_SetBars( opts[ idx ] );
+	fftStatReset();
 }
 // ---------------------------------------------------------------------------------------------
 void AUDIO_SpectrumFallStep( int dir ) {
