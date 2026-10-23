@@ -1,26 +1,27 @@
 /***************************************************************************
  *  ESP32-S3 USB Audio DAC  (USB Audio Class 1.0 -> FIFO -> I2S -> PCM5102)
  *
- *  audio.*   - cały podsystem audio (źródło, FIFO, drift, głośność, wyjście I2S)
- *  input.*   - enkoder, przyciski, pilot IR (wspólny timer)
- *  ui_oled.* - wyświetlacz
- *  ten plik  - klej: wejścia -> audio, audio -> UI, diagnostyka
+ *  audio.*      - cały podsystem audio (źródło, FIFO, drift, głośność, wyjście I2S)
+ *  input.*      - enkoder, przyciski, pilot IR (wspólny timer), bez wiedzy o reszcie
+ *  controls.*   - wejścia -> akcje (audio, UI, menu)
+ *  audio_ui.*   - audio -> UI (głośność, limit, widmo, liczniki)
+ *  menu_oled.*  - logika okienek menu
+ *  ui_oled.*    - wyświetlacz
+ *  ten plik     - inicjalizacja i pętla główna, diagnostyka
  ***************************************************************************/
 #include <Arduino.h>
 
 #include "src/audio/audio.h"
 #include "input.h"
 #include "ui_oled.h"
-#include "menu_oled.h"
+#include "controls.h"
+#include "audio_ui.h"
 
 /***************************************************************************
  *                              KONFIGURACJA
  ***************************************************************************/
-#define AUDIO_DIAG_SERIAL   0        /* 1 = co sekundę statystyki audio na Serial (źródło/FIFO fps, FIFO %) */
-#define VOL_DIAG_SERIAL     0        /* 1 = log "VOL host=... -> ...%" przy zmianie głośności */
-#define KEY_DIAG_SERIAL     1        /* 1 = log akcji klawiszy A-D / pilota na Serial */
+#define AUDIO_DIAG_SERIAL   0        /* 1 = co sekundę statystyki audio na Serial (źródło/FIFO fps, FIFO %, fs, blocks/s) */
 #define DIAG_PERIOD_MS      1000
-#define OLED_PERIOD_MS      100
 
 /* Głośność po starcie w dB (zakres od minimum do 0, 0 dB = pełna).
  * Ustawiana w źródle audio przed podłączeniem do hosta. Jeśli źródło jej nie
@@ -28,22 +29,9 @@
  * głośności z Windows lub dwuklika. */
 #define STARTUP_VOL_DB      (-20)
 
-/***************************************************************************
- *                              PROTOTYPY
- ***************************************************************************/
-static void volumeProc( uint32_t now );
-static void spectrumProc( uint32_t now );
 #if AUDIO_DIAG_SERIAL
 static void diagPrint( uint32_t now );
 #endif
-static void onEncRotate( int steps );
-static void onEncClick( void );
-static void onEncLongPress( void );
-static void onEncDoubleClick( void );
-static void onKeyRight( void );
-static void onKeyUp( void );
-static void onKeyLeft( void );
-static void onKeyDown( void );
 
 // ========================================================================================
 void setup() {
@@ -56,13 +44,6 @@ void setup() {
 
 	UI_Init();
 	INPUT_init();
-	INPUT_attach_rotate( onEncRotate );
-	INPUT_attach_action( onEncClick );
-	INPUT_attach_long_press( onEncLongPress );
-	INPUT_attach_keyA( onKeyRight );
-	INPUT_attach_keyB( onKeyUp );
-	INPUT_attach_keyC( onKeyLeft );
-	INPUT_attach_keyD( onKeyDown );
 
 	cfg.startup_vol_db = (int8_t)STARTUP_VOL_DB;
 	err = AUDIO_Init( &cfg );
@@ -72,20 +53,18 @@ void setup() {
 			delay( 1000 );
 	}
 
-	UI_SetGuard( AUDIO_GuardActive(), (float)STARTUP_VOL_DB );
-	if ( AUDIO_GuardActive() ) {
-		INPUT_attach_double_click( onEncDoubleClick ); /* dwuklik zwalnia awaryjny limit */
-	}
+	AUDIOUI_Init( STARTUP_VOL_DB );
+	CONTROLS_Init();                  /* po AUDIO_Init(): dwuklik zależy od limitu startowego */
 	Serial.println( "System ready" );
 }
-// -----------------------------------------------------------------------------------------
+// ----------------------------------------------------------------------------------------
 void loop() {
 	uint32_t now = millis();
-	
-	INPUT_proc();         /* enkoder + przyciski (callbacki) */
-	volumeProc( now );
-	spectrumProc( now );
-	UI_Loop(now);
+
+	INPUT_proc();                     /* enkoder + przyciski + IR (callbacki w controls.cpp) */
+	AUDIO_Poll( now );                /* źródło, głośność, limit startowy, widmo */
+	AUDIOUI_Sync( now );              /* audio -> UI */
+	UI_Loop( now );
 
 #if AUDIO_DIAG_SERIAL
 	diagPrint( now );
@@ -93,48 +72,6 @@ void loop() {
 	delay( 1 );
 }
 // ========================================================================================
-
-// ========================================================================================
-static void volumeProc( uint32_t now ) {
-	AUDIO_Volume_t vol;
-	int guard;
-	AUDIO_Poll( now );    /* źródło, głośność, limit startowy */
-
-	AUDIO_GetVolume( &vol );
-	guard = AUDIO_GuardActive();
-	UI_SetGuard( guard, guard ? (float)STARTUP_VOL_DB : 0.0f );
-
-#if VOL_DIAG_SERIAL
-	static int lastHost = 12345, lastMute = -1;
-	if ( (int)vol.host_db != lastHost || vol.mute != lastMute ) { /* log przy każdej zmianie głośności */
-		lastHost = (int)vol.host_db;
-		lastMute = vol.mute;
-		Serial.printf( "VOL host=%d dB -> lvl %d (win %d %%) gain=%.4f mute=%d\n",
-										(int)vol.host_db, vol.host_level, vol.host_percent, (double)vol.gain, vol.mute );
-	}
-#endif
-	UI_SetVolume( vol.level, vol.level_max, vol.mute ); /* liniowo 0..level_max, jeden tick = jeden krok */
-	UI_SetHostDb( (int)vol.host_db );
-}
-// ----------------------------------------------------------------------------------------
-static void spectrumProc( uint32_t now ) {
-	static uint32_t tOled = 0;
-
-	/* widmo: liczone tylko na ekranie SPECTRUM (FFT w AUDIO_Poll, czyli w tym wątku) */
-	AUDIO_Spectrum_t sp;
-	int viz = ( UI_GetScreen() == UI_SCREEN_SPECTRUM );
-
-	AUDIO_SpectrumEnable( viz );
-	if ( viz && AUDIO_GetSpectrum( &sp ) ) UI_SetSpectrum( sp.level, sp.peak, sp.bars );
-	
-	if ( now - tOled >= OLED_PERIOD_MS ) {
-		AUDIO_Stats_t st;
-		tOled = now;
-		AUDIO_GetStats( &st, 0 );
-		UI_SetDebug( st.blocks, st.fifo_bytes, st.src.packets, st.fft_us );
-	}
-}
-// ----------------------------------------------------------------------------------------
 /******************************************************************************************
  *                                       DIAGNOSTYKA
  *****************************************************************************************/
@@ -175,42 +112,4 @@ static void diagPrint( uint32_t now ) {
 		(unsigned long)s.out_errors );
 }
 #endif
-// ========================================================================================
-
-// ========================================================================================
-/******************************************************************************************
- *                    CALLBACKI WEJŚĆ (enkoder / przyciski / pilot IR)
- *
- * Warstwa dolna (ekran STAT / SPECTRUM):
- *   enkoder obrót = głośność, klik = mute, dwuklik = zwolnienie limitu startowego,
- *   długie naciśnięcie enkodera = przełączenie ekranu STAT <-> SPECTRUM,
- *   A (Right) / C (Left) = następny / poprzedni utwór.
- * Warstwa górna (okienko menu, znika po UI_MENU_MS bezczynności):
- *   B (Up) / D (Down) = poprzednie / następne okienko, pierwsze naciśnięcie tylko otwiera ostatnie,
- *   enkoder obrót = zmiana wartości w okienku (zamiast głośności).
- * Klawisze A..D i pilot IR wywołują te same funkcje (mapowanie kodów IR w input.h).
- *****************************************************************************************/
-static void onEncRotate( int steps ) {
-	if ( !MENU_Rotate( steps ) ) AUDIO_VolumeStep( steps );   /* okienko menu przejmuje enkoder, inaczej głośność */
-}
-static void onEncClick( void )       { AUDIO_MuteToggle(); }
-static void onEncLongPress( void )   { UI_NextScreen(); }                                  /* STAT <-> SPECTRUM */
-static void onEncDoubleClick( void ) { AUDIO_GuardRelease(); UI_SetGuard( 0, 0.0f ); }     /* zwolnij limit */
-// ---------------------------------------------------------------------------------------
-static void onKeyUp( void )   { MENU_Up(); }     /* B: poprzednie okienko */
-static void onKeyDown( void ) { MENU_Down(); }   /* D: następne okienko */
-// ---------------------------------------------------------------------------------------
-static void onKeyRight( void ) {                    /* A */
-	AUDIO_MediaKey( AUDIO_MEDIA_NEXT );
-#if KEY_DIAG_SERIAL
-	Serial.println( "KEY_A / IR: następny utwór" );
-#endif
-}
-// ---------------------------------------------------------------------------------------
-static void onKeyLeft( void ) {                     /* C */
-	AUDIO_MediaKey( AUDIO_MEDIA_PREV );
-#if KEY_DIAG_SERIAL
-	Serial.println( "KEY_C / IR: poprzedni utwór" );
-#endif
-}
 // ========================================================================================
