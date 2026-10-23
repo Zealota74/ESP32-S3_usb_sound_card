@@ -53,6 +53,12 @@ typedef enum {
 } UI_Screen_t;
 
 #define UI_SCREEN_DEFAULT  UI_SCREEN_SPECTRUM
+#ifndef UI_MENU_MS
+#define UI_MENU_MS      5000
+#endif
+
+void UI_ShowMenu(const char *title, const char *value, int pos, int max);
+int  UI_MenuOpen(void);   /* 1, gdy na wierzchu jest okienko menu (a nie OSD głośności/jasności) */
 
 void        UI_NextScreen(void);   /* STAT -> SPECTRUM -> STAT ... */
 UI_Screen_t UI_GetScreen(void);

@@ -27,6 +27,23 @@
  * głośności z Windows lub dwuklika. */
 #define STARTUP_VOL_DB      (-20)
 
+/***************************************************************************
+ *                              PROTOTYPY
+ ***************************************************************************/
+static void volumeProc( uint32_t now );
+static void spectrumProc( uint32_t now );
+#if AUDIO_DIAG_SERIAL
+static void diagPrint( uint32_t now );
+#endif
+static void onEncRotate( int steps );
+static void onEncClick( void );
+static void onEncLongPress( void );
+static void onEncDoubleClick( void );
+static void onKeyRight( void );
+static void onKeyUp( void );
+static void onKeyLeft( void );
+static void onKeyDown( void );
+
 // ========================================================================================
 void setup() {
 	AUDIO_Config_t cfg;
@@ -39,16 +56,12 @@ void setup() {
 	UI_Init();
 	INPUT_init();
 	INPUT_attach_rotate( onEncRotate );
-	INPUT_attach_action( onBtnClick );
-	INPUT_attach_long_press( onBtnLongPress );
-	INPUT_attach_keyA( onBtnKeyA );
-	INPUT_attach_keyB( onBtnKeyB );
-	INPUT_attach_keyC( onBtnKeyC );
-	INPUT_attach_keyD( onBtnKeyD );
-	INPUT_attach_keyA_long( onBtnKeyALong );
-	INPUT_attach_keyB_long( onBtnKeyBLong );
-	INPUT_attach_keyC_long( onBtnKeyCLong );
-	INPUT_attach_keyD_long( onBtnKeyDLong );
+	INPUT_attach_action( onEncClick );
+	INPUT_attach_long_press( onEncLongPress );
+	INPUT_attach_keyA( onKeyRight );
+	INPUT_attach_keyB( onKeyUp );
+	INPUT_attach_keyC( onKeyLeft );
+	INPUT_attach_keyD( onKeyDown );
 
 	cfg.startup_vol_db = (int8_t)STARTUP_VOL_DB;
 	err = AUDIO_Init( &cfg );
@@ -60,7 +73,7 @@ void setup() {
 
 	UI_SetGuard( AUDIO_GuardActive(), (float)STARTUP_VOL_DB );
 	if ( AUDIO_GuardActive() ) {
-		INPUT_attach_double_click( onBtnDoubleClick ); /* dwuklik zwalnia awaryjny limit */
+		INPUT_attach_double_click( onEncDoubleClick ); /* dwuklik zwalnia awaryjny limit */
 	}
 	Serial.println( "System ready" );
 }
@@ -69,20 +82,19 @@ void loop() {
 	uint32_t now = millis();
 	
 	INPUT_proc();         /* enkoder + przyciski (callbacki) */
-	VOL_proc(now);
-	SPECTRUM_proc(now);
+	volumeProc( now );
+	spectrumProc( now );
 	UI_Loop(now);
 
 #if AUDIO_DIAG_SERIAL
 	diagPrint( now );
-  audioSTAT( now );
 #endif
 	delay( 1 );
 }
 // ========================================================================================
 
 // ========================================================================================
-void VOL_proc( uint32_t now ) {
+static void volumeProc( uint32_t now ) {
 	AUDIO_Volume_t vol;
 	int guard;
 	AUDIO_Poll( now );    /* źródło, głośność, limit startowy */
@@ -104,7 +116,7 @@ void VOL_proc( uint32_t now ) {
 	UI_SetHostDb( (int)vol.host_db );
 }
 // ----------------------------------------------------------------------------------------
-void SPECTRUM_proc( uint32_t now ) {
+static void spectrumProc( uint32_t now ) {
 	static uint32_t tOled = 0;
 
 	/* widmo: liczone tylko na ekranie SPECTRUM (FFT w AUDIO_Poll, czyli w tym wątku) */
@@ -127,10 +139,10 @@ void SPECTRUM_proc( uint32_t now ) {
  *****************************************************************************************/
 #if AUDIO_DIAG_SERIAL
 static void diagPrint( uint32_t now ) {
-	static uint32_t tLast = 0, prevSrcBytes = 0, prevConsumed = 0;
+	static uint32_t tLast = 0, prevSrcBytes = 0, prevConsumed = 0, prevBlocks = 0;
 	AUDIO_Stats_t s;
 	uint32_t dt = now - tLast;
-	uint32_t srcFps, outFps;
+	uint32_t srcFps, outFps, blocksPerS;
 
 	if ( dt < DIAG_PERIOD_MS ) return;
 	tLast = now;
@@ -139,13 +151,17 @@ static void diagPrint( uint32_t now ) {
 
 	srcFps = ( s.src.bytes - prevSrcBytes ) / AUDIO_BYTES_PER_FRAME * 1000UL / dt;
 	outFps = ( s.consumed_frames - prevConsumed ) * 1000UL / dt;
+	blocksPerS = ( s.blocks - prevBlocks ) * 1000UL / dt;
 	prevSrcBytes = s.src.bytes;
 	prevConsumed = s.consumed_frames;
+	prevBlocks = s.blocks;
 
 	Serial.printf(
-		"%s | src in %lu fps, FIFO out %lu fps | FIFO %lu%% (min %lu%% max %lu%%) | "
+		"%s | fs %lu | blocks/s %lu | src in %lu fps, FIFO out %lu fps | FIFO %lu%% (min %lu%% max %lu%%) | "
 		"korekta %+ld ppm | OV %lu UF %lu short %lu | src age %lu ms | out err %lu\n",
 		s.playing ? "PLAY" : "IDLE",
+		(unsigned long)s.sample_rate,
+		(unsigned long)blocksPerS,
 		(unsigned long)srcFps, (unsigned long)outFps,
 		(unsigned long)( s.fifo_bytes * 100UL / s.fifo_size ),
 		(unsigned long)( s.fifo_min * 100UL / s.fifo_size ),
@@ -157,111 +173,106 @@ static void diagPrint( uint32_t now ) {
 		(unsigned long)s.src.age_ms,
 		(unsigned long)s.out_errors );
 }
-void audioSTAT(uint32_t now) {
-static uint32_t t0 = 0, b0 = 0;
-// uint32_t now = millis();
-if (now - t0 >= 5000) {            // 5 s zamiast 1 s, mniejszy wpływ jittera
-  AUDIO_Stats_t s;
-  AUDIO_GetStats(&s, 0);
-  Serial.printf("fs=%lu blocks/s=%.1f\n", (unsigned long)s.sample_rate,
-                (s.blocks - b0) * 1000.0f / (now - t0));
-  b0 = s.blocks;
-  t0 = now;
-}
-}
 #endif
 // ========================================================================================
 
 // ========================================================================================
 /******************************************************************************************
- *                    CALLBACKI WEJŚĆ (enkoder / przycisk)
+ *                    CALLBACKI WEJŚĆ (enkoder / przyciski / pilot IR)
+ *
+ * Warstwa dolna (ekran STAT / SPECTRUM):
+ *   enkoder obrót = głośność, klik = mute, dwuklik = zwolnienie limitu startowego,
+ *   długie naciśnięcie enkodera = przełączenie ekranu STAT <-> SPECTRUM,
+ *   A (Right) / C (Left) = następny / poprzedni utwór.
+ * Warstwa górna (okienko menu, znika po UI_MENU_MS bezczynności):
+ *   B (Up) / D (Down) = poprzednie / następne okienko, pierwsze naciśnięcie tylko otwiera ostatnie,
+ *   enkoder obrót = zmiana wartości w okienku (zamiast głośności).
+ * Klawisze A..D i pilot IR wywołują te same funkcje (mapowanie kodów IR w input.h).
  *****************************************************************************************/
-static void onEncRotate( int steps ) { AUDIO_VolumeStep( steps ); }                       /* tick = jeden poziom głośności */
-static void onBtnClick( void ) { AUDIO_MuteToggle(); }
-static void onBtnLongPress( void ) { UI_NextScreen(); }                                   /* STAT <-> SPECTRUM */
-static void onBtnDoubleClick( void ) { AUDIO_GuardRelease(); UI_SetGuard( 0, 0.0f ); }    /* zwolnij limit */
+typedef enum { MENU_BARS_CNT = 0, MENU_BRIGHT, MENU_ENGINE, MENU_BARS_FALL, MENU_COUNT } Menu_t;
+static int s_menuItem = MENU_BARS_CNT;       /* ostatnio używane okienko */
+// ---------------------------------------------------------------------------------------
+static void menuShow( void ) {
+	char t[ 20 ], v[ 16 ];
+	int pos = 0, max = 0;
 
-
-/* Klawisze KEY_A..KEY_D i pilot IR wywołują te same funkcje (mapowanie kodów IR w input.h).
-* Krótkie naciśnięcie (działa w każdym ekranie): A = następny utwór, C = poprzedni utwór,
-*                                                B = jaśniej, D = ciemniej.
-* Długie naciśnięcie (tylko w ekranie SPECTRUM):  A/C = liczba słupków 7/16/32 (w przód/w tył),
-*                                                B/D = szybsze/wolniejsze opadanie słupków.
-* Każda zmiana pokazuje OSD (warstwa nad ekranem), które samo znika po UI_OSD_MS.
-*/
-static void osdBars( void ) {
-	char v[ 8 ];
-	snprintf( v, sizeof( v ), "%d", AUDIO_SpectrumGetBars() );
-	UI_ShowOsd( "SPECTRUM BARS", v, 0, 0 );
+	switch ( s_menuItem ) {
+		case MENU_BARS_CNT:
+			snprintf( t, sizeof( t ), "%d/%d SPECTRUM BARS", MENU_BARS_CNT + 1, MENU_COUNT );
+			snprintf( v, sizeof( v ), "%d", AUDIO_SpectrumGetBars() );
+			break;
+		case MENU_BRIGHT:
+			snprintf( t, sizeof( t ), "%d/%d BRIGHTNESS", MENU_BRIGHT + 1, MENU_COUNT );
+			snprintf( v, sizeof( v ), "%d/%d", UI_GetBrightness() + 1, UI_BRIGHT_LEVELS );
+			pos = UI_GetBrightness();
+			max = UI_BRIGHT_LEVELS - 1;
+			break;
+		case MENU_ENGINE:
+			snprintf( t, sizeof( t ), "%d/%d ANALYSIS", MENU_ENGINE + 1, MENU_COUNT );
+			snprintf( v, sizeof( v ), "%s", AUDIO_SpectrumEngineName( AUDIO_SpectrumGetEngine() ) );
+			break;
+		case MENU_BARS_FALL:
+		default:
+			snprintf( t, sizeof( t ), "%d/%d SPECTRUM FALL", MENU_BARS_FALL + 1, MENU_COUNT );
+			snprintf( v, sizeof( v ), "%lu ms", (unsigned long)AUDIO_SpectrumGetFallMs() );
+			pos = AUDIO_SpectrumFallIndex();
+			max = AUDIO_SpectrumFallSteps() - 1;     /* pasek: dalej w prawo = szybsze opadanie */
+			break;
+	}
+	UI_ShowMenu( t, v, pos, max );
 }
 // ---------------------------------------------------------------------------------------
-static void osdFall( void ) {
-	char v[ 16 ];
-	snprintf( v, sizeof( v ), "%d ms", AUDIO_SpectrumGetFallMs() );
-	UI_ShowOsd( "SPECTRUM FALL", v, AUDIO_SpectrumFallIndex(), AUDIO_SpectrumFallSteps() - 1 );
+static void menuMove( int dir ) {        /* pierwsze naciśnięcie tylko otwiera, kolejne przełączają cyklicznie */
+	if ( UI_MenuOpen() ) s_menuItem = ( s_menuItem + dir + MENU_COUNT ) % MENU_COUNT;
+	menuShow();
 }
 // ---------------------------------------------------------------------------------------
-static void onBtnKeyA( void ) {
+static void menuChange( int steps ) {
+	int dir = ( steps > 0 ) ? 1 : -1;
+
+	switch ( s_menuItem ) {
+		case MENU_BARS_CNT:
+			AUDIO_SpectrumCycleBars( dir );
+			break;
+		case MENU_BRIGHT:
+			UI_BrightnessStep( steps );      /* bez zawijania: skok z max na min byłby nieprzyjemny */
+			break;
+		case MENU_ENGINE: {
+			int n = AUDIO_SpectrumEngineCount();
+			AUDIO_SpectrumSetEngine( ( AUDIO_SpectrumGetEngine() + dir + n ) % n );
+			break;
+		}
+		case MENU_BARS_FALL:
+			AUDIO_SpectrumFallStep( dir );   /* z ograniczeniem do zakresu, bez zawijania */
+			break;
+		default:
+			break;
+	}
+	menuShow();                              /* nadpisuje OSD jasności i odnawia czas okienka */
+}
+// ---------------------------------------------------------------------------------------
+static void onEncRotate( int steps ) {
+	if ( UI_MenuOpen() ) menuChange( steps );
+	else AUDIO_VolumeStep( steps );
+}
+static void onEncClick( void )       { AUDIO_MuteToggle(); }
+static void onEncLongPress( void )   { UI_NextScreen(); }                                  /* STAT <-> SPECTRUM */
+static void onEncDoubleClick( void ) { AUDIO_GuardRelease(); UI_SetGuard( 0, 0.0f ); }     /* zwolnij limit */
+// ---------------------------------------------------------------------------------------
+static void onKeyUp( void )   { menuMove( -1 ); }   /* B: poprzednie okienko */
+static void onKeyDown( void ) { menuMove( +1 ); }   /* D: następne okienko */
+// ---------------------------------------------------------------------------------------
+static void onKeyRight( void ) {                    /* A */
 	AUDIO_MediaKey( AUDIO_MEDIA_NEXT );
 #if KEY_DIAG_SERIAL
 	Serial.println( "KEY_A / IR: następny utwór" );
 #endif
 }
 // ---------------------------------------------------------------------------------------
-static void onBtnKeyC( void ) {
+static void onKeyLeft( void ) {                     /* C */
 	AUDIO_MediaKey( AUDIO_MEDIA_PREV );
 #if KEY_DIAG_SERIAL
 	Serial.println( "KEY_C / IR: poprzedni utwór" );
-#endif
-}
-// ---------------------------------------------------------------------------------------
-static void onBtnKeyB( void ) {
-	UI_BrightnessStep( +1 );
-#if KEY_DIAG_SERIAL
-	Serial.printf( "KEY_B / IR: jasność OLED %d/%d\n", UI_GetBrightness() + 1, UI_BRIGHT_LEVELS );
-#endif
-}
-// ---------------------------------------------------------------------------------------
-static void onBtnKeyD( void ) {
-	UI_BrightnessStep( -1 );
-#if KEY_DIAG_SERIAL
-	Serial.printf( "KEY_D / IR: jasność OLED %d/%d\n", UI_GetBrightness() + 1, UI_BRIGHT_LEVELS );
-#endif
-}
-// ---------------------------------------------------------------------------------------
-static void onBtnKeyALong( void ) {
-	if ( UI_GetScreen() != UI_SCREEN_SPECTRUM ) return;
-	AUDIO_SpectrumCycleBars( +1 );
-	osdBars();
-#if KEY_DIAG_SERIAL
-	Serial.printf( "KEY_A (długo): widmo %d słupków\n", AUDIO_SpectrumGetBars() );
-#endif
-}
-// ---------------------------------------------------------------------------------------
-static void onBtnKeyCLong( void ) {
-	if ( UI_GetScreen() != UI_SCREEN_SPECTRUM ) return;
-	AUDIO_SpectrumCycleBars( -1 );
-	osdBars();
-#if KEY_DIAG_SERIAL
-	Serial.printf( "KEY_C (długo): widmo %d słupków\n", AUDIO_SpectrumGetBars() );
-#endif
-}
-// ---------------------------------------------------------------------------------------
-static void onBtnKeyBLong( void ) {
-	if ( UI_GetScreen() != UI_SCREEN_SPECTRUM ) return;
-	AUDIO_SpectrumFallStep( +1 );
-	osdFall();
-#if KEY_DIAG_SERIAL
-	Serial.printf( "KEY_B (długo): opadanie słupków %d ms\n", AUDIO_SpectrumGetFallMs() );
-#endif
-}
-// ---------------------------------------------------------------------------------------
-static void onBtnKeyDLong( void ) {
-	if ( UI_GetScreen() != UI_SCREEN_SPECTRUM ) return;
-	AUDIO_SpectrumFallStep( -1 );
-	osdFall();
-#if KEY_DIAG_SERIAL
-	Serial.printf( "KEY_D (długo): opadanie słupków %d ms\n", AUDIO_SpectrumGetFallMs() );
 #endif
 }
 // ========================================================================================

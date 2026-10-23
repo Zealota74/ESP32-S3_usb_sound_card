@@ -359,3 +359,9 @@ void AUDIO_GetStats( AUDIO_Stats_t * out, int reset_minmax ) {
 	memset( &out->src, 0, sizeof( out->src ) );
 	if ( s_src != NULL && s_src->get_stats != NULL ) s_src->get_stats( &out->src );
 }
+
+
+int         AUDIO_SpectrumGetEngine( void )          { return SPEC_GetEngine(); }
+void        AUDIO_SpectrumSetEngine( int e )         { SPEC_SetEngine( e ); }
+int         AUDIO_SpectrumEngineCount( void )        { return SPEC_ENGINE_COUNT; }
+const char *AUDIO_SpectrumEngineName( int e )        { return SPEC_EngineName( e ); }

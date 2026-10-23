@@ -76,7 +76,9 @@ static void applyBrightness( void ) {
 	u8g2.setContrast( (uint8_t)c );
 }
 // ---------------------------------------------------------------------------------------------
-static void osdSet( const char * title, const char * value, int pos, int max, int isVolume ) {
+static bool s_osdMenu = false;
+// ---------------------------------------------------------------------------------------------
+static void osdSet( const char * title, const char * value, int pos, int max, int isVolume, int isMenu ) {
 	strncpy( s_osdTitle, title, sizeof( s_osdTitle ) - 1 );
 	s_osdTitle[ sizeof( s_osdTitle ) - 1 ] = '\0';
 	strncpy( s_osdValue, value, sizeof( s_osdValue ) - 1 );
@@ -84,17 +86,27 @@ static void osdSet( const char * title, const char * value, int pos, int max, in
 	s_osdPos = pos;
 	s_osdMax = max;
 	s_osdVolume = isVolume;
+
+	s_osdMenu = isMenu;
+
 	s_osdUntil = millis() + UI_OSD_MS;
 	s_osdOn = true;
 	s_dirty = 1;
 }
 // ---------------------------------------------------------------------------------------------
+void UI_ShowMenu( const char * title, const char * value, int pos, int max ) {
+	osdSet( title, value, pos, max, 0, 1 );
+}
+// ---------------------------------------------------------------------------------------------
+int UI_MenuOpen( void ) {
+	return s_osdOn && s_osdMenu && (int32_t)( millis() - s_osdUntil ) < 0;
+}
+// ---------------------------------------------------------------------------------------------
 static void osdShowVolume( void ) {
 	char v[ 16 ];
-
 	if ( s_mute ) snprintf( v, sizeof( v ), "MUTE" );
 	else snprintf( v, sizeof( v ), "%d", (int)s_pct );
-	osdSet( "VOLUME", v, s_mute ? 0 : (int)s_pct, (int)s_max, 1 );
+	osdSet( "VOLUME", v, s_mute ? 0 : (int)s_pct, (int)s_max, 1, 0 );
 }
 // ---------------------------------------------------------------------------------------------
 void UI_Init( void ) {
@@ -117,7 +129,7 @@ void UI_SetBrightness( int level ) {
 		applyBrightness();
 	}
 	snprintf( v, sizeof( v ), "%d/%d", s_bright + 1, UI_BRIGHT_LEVELS ); /* OSD także na końcach zakresu */
-	osdSet( "BRIGHTNESS", v, s_bright, UI_BRIGHT_LEVELS - 1, 0 );
+	osdSet( "BRIGHTNESS", v, s_bright, UI_BRIGHT_LEVELS - 1, 0, 0 );
 }
 // ---------------------------------------------------------------------------------------------
 void UI_BrightnessStep( int steps ) {
@@ -178,7 +190,7 @@ void UI_SetSpectrum( const uint8_t * level, const uint8_t * peak, int bars ) {
 }
 // ---------------------------------------------------------------------------------------------
 void UI_ShowOsd( const char * title, const char * value, int pos, int max ) {
-	osdSet( title, value, pos, max, 0 );
+	osdSet( title, value, pos, max, 0, 0 );
 }
 // ---------------------------------------------------------------------------------------------
 /* sendBuffer() z pomiarem czasu (do ekranu STAT) */

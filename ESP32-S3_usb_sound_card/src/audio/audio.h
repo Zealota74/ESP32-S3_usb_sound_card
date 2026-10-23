@@ -103,6 +103,11 @@ int  AUDIO_SpectrumFallSteps(void);
 /* Statystyki; reset_minmax = 1 zeruje fifo_min/fifo_max po odczycie. */
 void AUDIO_GetStats(AUDIO_Stats_t *out, int reset_minmax);
 
+int         AUDIO_SpectrumGetEngine( void );
+void        AUDIO_SpectrumSetEngine( int e );
+int         AUDIO_SpectrumEngineCount( void );
+const char *AUDIO_SpectrumEngineName( int e );
+
 #ifdef __cplusplus
 }
 #endif
