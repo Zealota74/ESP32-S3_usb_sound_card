@@ -65,6 +65,7 @@ static char s_osdValue[ 16 ] = "";
 static int s_osdPos = 0, s_osdMax = 0;
 static int s_osdVolume = 0;                      /* 1 = OSD głośności (dopisek LIMIT) */
 static bool s_osdOn = false;
+static bool s_osdMenu = false;                   /* 1 = okienko menu (czas UI_MENU_MS, enkoder zmienia wartość) */
 static uint32_t s_osdUntil = 0;
 
 // =============================================================================================
@@ -76,8 +77,6 @@ static void applyBrightness( void ) {
 	u8g2.setContrast( (uint8_t)c );
 }
 // ---------------------------------------------------------------------------------------------
-static bool s_osdMenu = false;
-// ---------------------------------------------------------------------------------------------
 static void osdSet( const char * title, const char * value, int pos, int max, int isVolume, int isMenu ) {
 	strncpy( s_osdTitle, title, sizeof( s_osdTitle ) - 1 );
 	s_osdTitle[ sizeof( s_osdTitle ) - 1 ] = '\0';
@@ -88,8 +87,7 @@ static void osdSet( const char * title, const char * value, int pos, int max, in
 	s_osdVolume = isVolume;
 
 	s_osdMenu = isMenu;
-
-	s_osdUntil = millis() + UI_OSD_MS;
+	s_osdUntil = millis() + ( isMenu ? UI_MENU_MS : UI_OSD_MS );
 	s_osdOn = true;
 	s_dirty = 1;
 }
