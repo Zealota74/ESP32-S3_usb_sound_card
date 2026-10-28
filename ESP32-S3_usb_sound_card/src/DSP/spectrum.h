@@ -1,11 +1,11 @@
 /*
  * spectrum.h - analizator widma (FFT) dla toru audio. Kod niezależny od platformy.
  *
- * SPECTRUM_Feed() zapisuje próbki mono do bufora kołowego (historia okna analizy).
- * SPECTRUM_Process() co SPECTRUM_HOP nowych próbek liczy moc pasm
- * logarytmicznych (7/16/32/64) wybranym silnikiem i wygładza słupki (szybkie narastanie,
- * wolne opadanie, kreska szczytu z podtrzymaniem). Cały moduł jest jednowątkowy: wszystkie funkcje woła ten sam
- * wątek (loop). Przekazanie próbek z wątku audio i politykę zaległości prowadzi dsp_manage.
+ * SPECTRUM_Feed() zapisuje próbki do buforów kołowych (historia okna analizy).
+ * SPECTRUM_Process() co SPECTRUM_HOP nowych próbek liczy moc pasm logarytmicznych (7/16/32/64 na kanał) wybranym
+ * silnikiem, a SPECTRUM_GetPower() oddaje ją w skali liniowej (sinus pełnej skali = 1.0). Dalsza obróbka na wygląd
+ * słupków (dB, opadanie, kreska szczytu) należy do UI (ui_bars.*). Cały moduł jest jednowątkowy: wszystkie funkcje woła
+ * ten sam wątek (loop). Przekazanie próbek z wątku audio i politykę zaległości prowadzi dsp_manage.
  *
  * Silniki analizy pasm (przełączane w czasie pracy):
  *   SPECTRUM_ENGINE_FFT - FFT N punktów (okno Hanna, przesuwane), pasma = sumy mocy binów,
@@ -22,7 +22,7 @@
 extern "C" {
 #endif
 
-#define SPECTRUM_MAX_BARS   64      /* łączny limit słupków: kanały x słupki na kanał */
+#define SPECTRUM_MAX_BANDS  64      /* łączny limit pasm: kanały x pasma na kanał */
 
 #define SPECTRUM_ENGINE_FFT    0
 #define SPECTRUM_ENGINE_IIR    1
@@ -35,11 +35,11 @@ void SPECTRUM_Init(uint32_t sample_rate);
  * Wołać z tego samego wątku co SPECTRUM_Process(). */
 void SPECTRUM_Feed(const int16_t *stereo, uint32_t frames);
 
-/* Zmiana częstotliwości próbkowania w czasie pracy: przelicza pasma i czas opadania, zeruje słupki.
+/* Zmiana częstotliwości próbkowania w czasie pracy: przelicza pasma i zeruje stan analizy.
  * Wołać z tego samego wątku co SPECTRUM_Process() (loop). */
 void SPECTRUM_SetRate(uint32_t sample_rate);
 
-/* Wybór silnika analizy pasm (SPECTRUM_ENGINE_*). Zmiana zeruje słupki i stan filtrów.
+/* Wybór silnika analizy pasm (SPECTRUM_ENGINE_*). Zmiana zeruje stan analizy (filtry).
  * Wołać z tego samego wątku co SPECTRUM_Process() (loop). Indeks spoza zakresu jest ograniczany. */
 void        SPECTRUM_SetEngine(int engine);
 int         SPECTRUM_GetEngine(void);
@@ -48,38 +48,31 @@ const char *SPECTRUM_EngineName(int engine);   /* "FFT" / "IIR" / "IIR-MR", do w
 /* Dobroć pasm w silniku FFT. q = 0: pasma "cegiełkowe" (suma binów, jak dotąd); q > 0: jądro trójkątne o szerokości
  * połówkowej f0/q, wspólne dla wszystkich pasm (nie węższe niż rozdzielczość FFT), pasma nachodzą na siebie;
  * q < 0: automatycznie dobroć najniższego pasma (wynika z rozdzielczości FFT). Domyślnie SPECTRUM_FFT_Q.
- * Wołać z tego samego wątku co SPECTRUM_Process() (loop). Nie zeruje słupków. */
+ * Wołać z tego samego wątku co SPECTRUM_Process() (loop). Nie zeruje stanu analizy. */
 void  SPECTRUM_SetFftQ(float q);
 float SPECTRUM_GetFftQ(void);
 
-/* Kanały i słupki jednym wywołaniem (jedna przebudowa pasm i silnika).
+/* Kanały i pasma jednym wywołaniem (jedna przebudowa pasm i silnika).
  * channels: 1 = miks mono (L+R)/2, 2 = L i R osobno (ograniczone do SPECTRUM_MAX_CHANNELS).
- * bars = słupki NA KANAŁ, 1..SPECTRUM_MAX_BARS / channels (używane: 7, 16, 32, 64); wartości spoza zakresu są ograniczane,
- * a odczyt (GetChannels/GetBars) zwraca wartości faktycznie ustawione. Zmiana zeruje słupki; zmiana liczby kanałów
+ * bands = pasma NA KANAŁ, 1..SPECTRUM_MAX_BANDS / channels (używane: 7, 16, 32, 64); wartości spoza zakresu są ograniczane,
+ * a odczyt (GetChannels/GetBands) zwraca wartości faktycznie ustawione. Zmiana zeruje stan analizy; zmiana liczby kanałów
  * czyści też bufory próbek. */
-void SPECTRUM_Configure(int channels, int bars);
+void SPECTRUM_Configure(int channels, int bands);
 
-/* Liczba słupków na kanał (jak wyżej, przy bieżącej liczbie kanałów). Zmiana zeruje słupki. */
-void SPECTRUM_SetBars(int bars);
-int  SPECTRUM_GetBars(void);
+/* Liczba pasm na kanał (jak wyżej, przy bieżącej liczbie kanałów). Zmiana zeruje stan analizy. */
+void SPECTRUM_SetBands(int bands);
+int  SPECTRUM_GetBands(void);
 
-/* Liczba kanałów (1 lub 2). Gdy bieżąca liczba słupków się nie mieści (kanały x słupki > SPECTRUM_MAX_BARS), jest zmniejszana;
+/* Liczba kanałów (1 lub 2). Gdy bieżąca liczba pasm się nie mieści (kanały x pasma > SPECTRUM_MAX_BANDS), jest zmniejszana;
  * powrót do 1 kanału jej nie przywraca. */
 void SPECTRUM_SetChannels(int channels);
 int  SPECTRUM_GetChannels(void);
 
-/* Szybkość opadania słupków: indeks 0 = najwolniej ... SPECTRUM_FallSteps()-1 = najszybciej
- * (czasy z SPECTRUM_FALL_MS_LIST). SPECTRUM_SetFall ogranicza indeks do zakresu. */
-int      SPECTRUM_FallSteps(void);
-void     SPECTRUM_SetFall(int idx);
-int      SPECTRUM_GetFall(void);
-uint32_t SPECTRUM_GetFallMs(void);
-
-/* Zeruje słupki i szczyty (np. po włączeniu ekranu). */
+/* Zeruje stan silnika i zaczyna od świeżych próbek (np. po włączeniu widma). */
 void SPECTRUM_Reset(void);
 
-/* Nieciągłość strumienia (utracone próbki): zeruje historię okna i stan silnika, ale zostawia słupki
- * (opadają same). Analiza rusza od próbek, które przyjdą po wywołaniu. */
+/* Nieciągłość strumienia (utracone próbki): zeruje historię okna i stan silnika. Analiza rusza od próbek,
+ * które przyjdą po wywołaniu. */
 void SPECTRUM_Resync(void);
 
 /* Liczy kolejną ramkę, jeśli przybyło dość próbek. Zwraca 1, gdy powstała nowa ramka. */
@@ -94,9 +87,9 @@ uint32_t SPECTRUM_GetLastBlock(void);
  * zawołaj SPECTRUM_Reset(), bo stan filtrów IIR dostaje powtórnie te same próbki. Zwraca 1/0 jak SPECTRUM_Process. */
 int SPECTRUM_Bench(void);
 
-/* Poziomy 0..255 i szczyty 0..255 dla wszystkich kanałów: układ [kanał * bars + słupek], razem kanały x bars wartości
- * (tablice min. SPECTRUM_MAX_BARS). */
-void SPECTRUM_GetFrame(uint8_t *level, uint8_t *peak);
+/* Moc pasm z ostatniej ramki: układ [kanał * bands + pasmo], razem kanały x bands wartości (tablica min. SPECTRUM_MAX_BANDS
+ * floatów). Skala liniowa: sinus pełnej skali w środku pasma = 1.0 (0 dB). Wołać po SPECTRUM_Process() zwracającym 1. */
+void SPECTRUM_GetPower(float *power);
 
 #ifdef SPECTRUM_TEST
 const float *SPECTRUM_DebugPower(void);        /* moc binów FFT (tylko po silniku FFT) */

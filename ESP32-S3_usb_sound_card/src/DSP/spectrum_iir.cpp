@@ -9,7 +9,7 @@
  * samo rozdzielczości co soprany. Ceną jest opóźnienie rosnące ku basowi (ok. Q/(pi*f0)).
  *
  * Skala wyjścia dopasowana do FFT dla szumu (suma mocy w paśmie); poprawka: SPECTRUM_IIR_TRIM_DB.
- * Pamięć: ok. 4 kB dla 64 pasm x 2 sekcje (łącznie dla wszystkich kanałów: kanały x pasma <= SPECTRUM_MAX_BARS,
+ * Pamięć: ok. 4 kB dla 64 pasm x 2 sekcje (łącznie dla wszystkich kanałów: kanały x pasma <= SPECTRUM_MAX_BANDS,
  * stan pasma każdego kanału jest osobny, współczynniki te same). Koszt rośnie liniowo z liczbą pasm (każde pasmo na pełnej fs);
  * tańsza wersja z decymacją: spectrum_iir_mr.cpp.
  *
@@ -49,8 +49,8 @@ typedef struct {
 	float    e;                   /* wygładzona energia (sinus pełnej skali -> 0.5) */
 } IirBand_t;
 
-static IirBand_t s_ib[ SPECTRUM_MAX_BARS ];   /* indeks: kanał * s_bars + pasmo */
-static int       s_bars = 0;
+static IirBand_t s_ib[ SPECTRUM_MAX_BANDS ];   /* indeks: kanał * s_bands + pasmo */
+static int       s_bands = 0;
 static int       s_channels = 1;
 static float     s_x[ CHUNK ];    /* próbki bloku przeskalowane do +-1.0 */
 static float     s_y[ CHUNK ];    /* wyjście kolejnych sekcji filtru jednego pasma */
@@ -66,28 +66,28 @@ static void iirInit( void ) {
 }
 // ---------------------------------------------------------------------------------------------
 static void iirReset( void ) {
-	for ( int b = 0; b < s_bars * s_channels; b++ ) {
+	for ( int b = 0; b < s_bands * s_channels; b++ ) {
 		for ( int s = 0; s < SECTIONS; s++ ) s_ib[ b ].sec[ s ].z1 = s_ib[ b ].sec[ s ].z2 = 0.0f;
 		s_ib[ b ].e = 0.0f;
 	}
 }
 // ---------------------------------------------------------------------------------------------
-static void iirConfigure( uint32_t fs, const SpectrumBand_t * band, int bars, int channels ) {
+static void iirConfigure( uint32_t fs, const SpectrumBand_t * band, int bands, int channels ) {
 	double bwScale, enbwRatio;
 	float tauMin = (float)SPECTRUM_IIR_TAU_MIN_MS * 0.001f;
 
 	SpectrumBp_CascadeScale( SECTIONS, &bwScale, &enbwRatio );
 
-	/* Normalizacja: szum biały w paśmie daje ten sam poziom co suma mocy binów FFT, czyli wygląd słupków
+	/* Normalizacja: szum biały w paśmie daje ten sam poziom co suma mocy binów FFT, czyli wygląd widma
 	 * jest zgodny po przełączeniu silników. Suma binów FFT z oknem Hanna zawyża moc o ENBW okna = 1.5
 	 * (+1,76 dB; dotyczy też sinusa), a bank IIR mierzy energię wprost, więc tę samą stałą dokładamy tu.
 	 * 2.0 = sinus A: <y^2> = A^2/2. Sinus w środku pasma wypada przy 2 sekcjach ok. 0,9 dB poniżej FFT.
 	 * TRIM_DB koryguje całość. */
 	s_gain = (float)( 2.0 * HANN_ENBW / enbwRatio * pow( 10.0, (double)SPECTRUM_IIR_TRIM_DB / 10.0 ) );
 
-	s_bars = bars;
+	s_bands = bands;
 	s_channels = channels;
-	for ( int b = 0; b < bars; b++ ) {
+	for ( int b = 0; b < bands; b++ ) {
 		float tau = (float)SPECTRUM_IIR_TAU_CYCLES / band[ b ].f0;
 		double beta;
 
@@ -100,7 +100,7 @@ static void iirConfigure( uint32_t fs, const SpectrumBand_t * band, int bars, in
 		s_ib[ b ].alpha = (float)( 1.0 - beta );
 		s_ib[ b ].e = 0.0f;
 	}
-	for ( int ch = 1; ch < channels; ch++ ) memcpy( &s_ib[ ch * bars ], &s_ib[ 0 ], (size_t)bars * sizeof( IirBand_t ) );   /* te same filtry, osobny stan */
+	for ( int ch = 1; ch < channels; ch++ ) memcpy( &s_ib[ ch * bands ], &s_ib[ 0 ], (size_t)bands * sizeof( IirBand_t ) );   /* te same filtry, osobny stan */
 }
 // ---------------------------------------------------------------------------------------------
 /* Jedno pasmo przez blok: kolejne sekcje (przebiegi po całym bloku), potem detektor. */
@@ -129,19 +129,19 @@ static int iirProcess( uint32_t from, uint32_t to, float * power ) {
 
 		for ( int ch = 0; ch < s_channels; ch++ ) {
 			const int16_t * ring = g_spectrumRing[ ch ];
-			IirBand_t * bd = &s_ib[ ch * s_bars ];
+			IirBand_t * bd = &s_ib[ ch * s_bands ];
 
 			for ( int i = 0; i < cnt; i++ ) {
 				s_x[ i ] = (float)ring[ ( from + done + (uint32_t)i ) & SPECTRUM_RING_MASK ] * ( 1.0f / 32768.0f );
 			}
-			for ( int b = 0; b < s_bars; b++ ) runBand( &bd[ b ], s_x, cnt );
+			for ( int b = 0; b < s_bands; b++ ) runBand( &bd[ b ], s_x, cnt );
 		}
 	}
 	if ( (uint32_t)( SpectrumRing_Wr() - from ) > (uint32_t)SPECTRUM_RING_SIZE ) {   /* producent nadpisał dane w trakcie liczenia */
 		iirReset();
 		return 0;
 	}
-	for ( int b = 0; b < s_bars * s_channels; b++ ) power[ b ] = s_gain * s_ib[ b ].e;
+	for ( int b = 0; b < s_bands * s_channels; b++ ) power[ b ] = s_gain * s_ib[ b ].e;
 	return 1;
 }
 // ---------------------------------------------------------------------------------------------

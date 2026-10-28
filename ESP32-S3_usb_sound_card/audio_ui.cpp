@@ -5,11 +5,16 @@
 
 #include "src/audio_manage.h"
 #include "src/dsp_manage.h"
+
 #include "ui_oled.h"
+#include "ui_bars.h"
 #include "audio_ui.h"
 
 #define VOL_DIAG_SERIAL     0        /* 1 = log "VOL host=... -> ...%" przy zmianie głośności */
 #define OLED_PERIOD_MS      100      /* odświeżanie liczników ekranu STAT */
+
+static_assert( BARS_MAX == DSP_SPECTRUM_MAX_BANDS, "BARS_MAX (ui_bars.h) musi byc rowne DSP_SPECTRUM_MAX_BANDS" );
+static_assert( UI_SPEC_MAX_BARS == DSP_SPECTRUM_MAX_BANDS, "UI_SPEC_MAX_BARS (ui_oled.h) musi byc rowne DSP_SPECTRUM_MAX_BANDS" );
 
 static int s_startupDb = 0;
 
@@ -42,12 +47,21 @@ static void syncVolume( void ) {
 // ---------------------------------------------------------------------------------------------
 static void syncSpectrum( uint32_t now ) {
 	static uint32_t tOled = 0;
-	DSP_Spectrum_t sp;
+	static int s_wasViz = 0;
+	DSP_Bands_t sp;
 	int viz = ( UI_GetScreen() == UI_SCREEN_SPECTRUM );
 
-	/* widmo liczone tylko na ekranie SPECTRUM (FFT w AUDIO_Poll, czyli w tym samym wątku) */
+	/* widmo liczone tylko na ekranie SPECTRUM (analiza w DSP_Poll, w tym samym wątku) */
+	if ( viz && !s_wasViz ) BARS_Reset();            /* po włączeniu ekranu słupki startują od zera */
+	s_wasViz = viz;
 	DSP_SpectrumEnable( viz );
-	if ( viz && DSP_GetSpectrum( &sp ) ) UI_SetSpectrum( sp.level, sp.peak, sp.bars );
+	if ( viz && DSP_GetBandPower( &sp ) ) {
+		uint8_t level[ BARS_MAX ], peak[ BARS_MAX ];
+
+		BARS_Update( sp.power, sp.channels * sp.bands, now );
+		BARS_Get( level, peak );
+		UI_SetSpectrum( level, peak, sp.bands );     /* rysowany jest pierwszy kanał (ekran jest na razie jednokanałowy) */
+	}
 
 	if ( now - tOled >= OLED_PERIOD_MS ) {
 		AUDIO_Stats_t st;

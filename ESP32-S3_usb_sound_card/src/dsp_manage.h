@@ -11,7 +11,7 @@
  * Użycie:
  *   setup(): AUDIO_Init(&cfg); DSP_Init();
  *   loop():  AUDIO_Poll(millis()); DSP_Poll();  w każdym przebiegu
- *            DSP_Spectrum*() / DSP_GetSpectrum() dla UI
+ *            DSP_Spectrum*() / DSP_GetBandPower() dla UI (wygląd słupków robi UI: ui_bars.*)
  */
 #ifndef DSP_MANAGE_H
 #define DSP_MANAGE_H
@@ -30,29 +30,27 @@ void DSP_Init(void);
 void DSP_Poll(void);
 
 /* ---- Analizator widma ---- */
-#define DSP_SPECTRUM_MAX_BARS  64            /* łącznie dla wszystkich kanałów: kanały x słupki na kanał */
+#define DSP_SPECTRUM_MAX_BANDS  64           /* łącznie dla wszystkich kanałów: kanały x pasma na kanał */
 
+/* Ramka widma: moc pasm w skali liniowej (sinus pełnej skali w środku pasma = 1.0, czyli 0 dB). Wygląd słupków
+ * (dB, opadanie, kreska szczytu) robi z tego UI. */
 typedef struct {
-  uint8_t  bars;                              /* liczba słupków NA KANAŁ: 7, 16, 32 lub 64 */
   uint8_t  channels;                          /* 1 = miks mono (L+R)/2, 2 = L i R osobno */
-  uint8_t  level[DSP_SPECTRUM_MAX_BARS];      /* wysokość słupka 0..255, układ [kanał * bars + słupek] */
-  uint8_t  peak[DSP_SPECTRUM_MAX_BARS];       /* kreska szczytu 0..255, ten sam układ */
-} DSP_Spectrum_t;
+  uint8_t  bands;                             /* liczba pasm NA KANAŁ: 7, 16, 32 lub 64 */
+  float    power[DSP_SPECTRUM_MAX_BANDS];     /* moc pasma, układ [kanał * bands + pasmo] */
+} DSP_Bands_t;
 
 void DSP_SpectrumEnable(int on);              /* włącz tylko, gdy widmo jest wyświetlane */
-void DSP_SpectrumSetBars(int bars);           /* słupki na kanał: 7, 16, 32 lub 64 (kanały x słupki <= DSP_SPECTRUM_MAX_BARS) */
-int  DSP_SpectrumGetBars(void);
-void DSP_SpectrumCycleBars(int dir);          /* +1 / -1: 7 -> 16 -> 32 -> 64 -> 7 (cyklicznie, tylko wartości mieszczące się w limicie) */
-/* Kanały: 1 = miks mono, 2 = L i R osobno. Gdy liczba słupków się nie mieści (np. 2 kanały po 64), jest zmniejszana.
- * DSP_SpectrumConfigure ustawia oba naraz (jedna przebudowa). Odczyt zwraca wartości faktycznie ustawione. */
+int  DSP_GetBandPower(DSP_Bands_t *out);      /* 1 = nowa ramka od ostatniego wywołania */
+
+/* Liczba pasm na kanał (kanały x pasma <= DSP_SPECTRUM_MAX_BANDS) i liczba kanałów (1 = miks mono, 2 = L i R osobno).
+ * Gdy liczba pasm się nie mieści (np. 2 kanały po 64), jest zmniejszana. Odczyt zwraca wartości faktycznie ustawione.
+ * DSP_SpectrumConfigure ustawia oba naraz (jedna przebudowa). Po zmianie układu pasm UI zaczyna słupki od zera. */
+void DSP_SpectrumSetBands(int bands);
+int  DSP_SpectrumGetBands(void);
 void DSP_SpectrumSetChannels(int channels);
 int  DSP_SpectrumGetChannels(void);
-void DSP_SpectrumConfigure(int channels, int bars);
-int  DSP_GetSpectrum(DSP_Spectrum_t *out);    /* 1 = nowa ramka od ostatniego wywołania */
-void DSP_SpectrumFallStep(int dir);           /* +1 szybsze opadanie słupków, -1 wolniejsze (bez zawijania) */
-int  DSP_SpectrumGetFallMs(void);             /* czas opadania słupka z pełnej skali do zera (ms) */
-int  DSP_SpectrumFallIndex(void);             /* 0 = najwolniej ... DSP_SpectrumFallSteps()-1 = najszybciej */
-int  DSP_SpectrumFallSteps(void);
+void DSP_SpectrumConfigure(int channels, int bands);
 
 int         DSP_SpectrumGetEngine(void);
 void        DSP_SpectrumSetEngine(int e);

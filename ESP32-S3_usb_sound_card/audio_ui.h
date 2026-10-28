@@ -2,7 +2,7 @@
  * audio_ui.h - most audio -> UI: co cykl loop() przekazuje do ui_oled.* głośność, limit startowy,
  * widmo i liczniki diagnostyczne. Odwrotny kierunek (wejścia -> audio) obsługuje controls.*.
  *
- * Kolejność w loop(): AUDIO_Poll( now ) (źródło, FIFO, widmo), potem AUDIOUI_Sync( now ), potem UI_Loop( now ).
+ * Kolejność w loop(): AUDIO_Poll( now ) (źródło, FIFO), DSP_Poll() (widmo), potem AUDIOUI_Sync( now ), potem UI_Loop( now ).
  */
 #ifndef AUDIO_UI_H
 #define AUDIO_UI_H

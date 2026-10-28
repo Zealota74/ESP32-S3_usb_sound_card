@@ -1,13 +1,14 @@
 /*
  * dsp_config.h - parametry modułów DSP (analizator widma).
  * Parametry toru audio (format, FIFO, źródło): AUDIO/audio_config.h.
+ * Wygląd słupków (skala dB, opadanie, kreska szczytu): ui_bars.h (warstwa UI).
  */
 #ifndef DSP_CONFIG_H
 #define DSP_CONFIG_H
 
 /* ---- Analizator widma ---- */
 /* Maksymalna liczba kanałów analizy: 1 = tylko miks mono (oszczędza 16 KB RAM), 2 = także L i R osobno.
- * Łączny limit słupków (kanały x słupki) to SPECTRUM_MAX_BARS w spectrum.h. */
+ * Łączny limit pasm (kanały x pasma) to SPECTRUM_MAX_BANDS w spectrum.h. */
 #ifndef SPECTRUM_MAX_CHANNELS
 #define SPECTRUM_MAX_CHANNELS  2
 #endif
@@ -15,15 +16,6 @@
 #define SPECTRUM_HOP         1024    /* co tyle nowych próbek liczymy FFT (512 = gładziej, 2x CPU) */
 #define SPECTRUM_F_LOW       30      /* Hz, dolna krawędź pierwszego pasma */
 #define SPECTRUM_F_HIGH      20000   /* Hz, górna krawędź ostatniego pasma */
-#define SPECTRUM_DB_TOP      (-15)   /* dB (energia pasma, 0 dB = sinus pełnej skali) = pełny słupek */
-#define SPECTRUM_DB_FLOOR    (-75)   /* dB = pusty słupek */
-/* Czas opadania słupka z pełnej skali do zera (ms), od najwolniejszego do najszybszego.
- * Regulowany w czasie pracy (ekran SPECTRUM, długie naciśnięcie B/D); przeliczany na krok na ramkę z hopa i częstotliwości
- * próbkowania, więc zmiana SPECTRUM_HOP nie zmienia wrażenia. */
-#define SPECTRUM_FALL_MS_LIST  { 1500, 1000, 700, 500, 350, 250, 150, 100 }
-#define SPECTRUM_FALL_DEFAULT  3     /* indeks na liście: 500 ms */
-#define SPECTRUM_PEAK_HOLD   20      /* ramki podtrzymania kreski szczytu */
-#define SPECTRUM_PEAK_FALL   4       /* opadanie kreski szczytu na ramkę */
 
 // Simon test
 // #define SPECTRUM_FFT_Q           -1.0f   /* 0 = jak dotąd, > 0 = Q, < 0 = auto */

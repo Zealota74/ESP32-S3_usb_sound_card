@@ -1,9 +1,9 @@
 /*
  * spectrum.cpp - analizator widma: część wspólna dla wszystkich silników.
  *
- * Tu leży: bufor kołowy (SPECTRUM_Feed), podział na pasma logarytmiczne, wybór silnika,
- * oraz obróbka słupków (moc -> dB -> 0..255, opadanie, kreska szczytu).
- * Silniki liczą wyłącznie moc pasm: spectrum_fft.cpp (FFT), spectrum_iir.cpp (bank IIR).
+ * Tu leży: bufor kołowy (SPECTRUM_Feed), podział na pasma logarytmiczne i wybór silnika.
+ * Silniki liczą wyłącznie moc pasm: spectrum_fft.cpp (FFT), spectrum_iir.cpp (bank IIR), spectrum_iir_mr.cpp.
+ * Wygląd słupków (dB, opadanie, kreska szczytu) nie należy do DSP: ui_bars.* w warstwie UI.
  */
 #include <math.h>
 #include <string.h>
@@ -21,19 +21,12 @@ static const SpectrumEngine_t * const kEngine[ SPECTRUM_ENGINE_COUNT ] = { &g_sp
 static int s_engine = SPECTRUM_ENGINE_DEFAULT;
 
 static uint32_t   s_fs = 44100;
-static SpectrumBand_t s_band[ SPECTRUM_MAX_BARS ];
-static float      s_bandPow[ SPECTRUM_MAX_BARS ];   /* moc pasm z silnika (sinus pełnej skali = 1.0) */
-static int        s_bars = 16;                      /* słupki na kanał */
-static int        s_channels = 1;                   /* 1 = miks mono, 2 = L i R osobno; kanały x słupki <= SPECTRUM_MAX_BARS */
+static SpectrumBand_t s_band[ SPECTRUM_MAX_BANDS ];
+static float      s_bandPow[ SPECTRUM_MAX_BANDS ];   /* moc pasm z silnika (sinus pełnej skali = 1.0) */
+static int        s_bands = 16;                      /* pasma na kanał */
+static int        s_channels = 1;                   /* 1 = miks mono, 2 = L i R osobno; kanały x pasma <= SPECTRUM_MAX_BANDS */
 
-static const uint16_t kFallMs[] = SPECTRUM_FALL_MS_LIST;
-#define FALL_STEPS ( (int)( sizeof( kFallMs ) / sizeof( kFallMs[ 0 ] ) ) )
 #define HOP        ( SPECTRUM_HOP )
-static int    s_fallIdx = SPECTRUM_FALL_DEFAULT;
-static int    s_fallPerFrame = 12;     /* opadanie słupka na ramkę (skala 0..255) */
-static int    s_level[ SPECTRUM_MAX_BARS ];
-static int    s_peak[ SPECTRUM_MAX_BARS ];
-static int    s_hold[ SPECTRUM_MAX_BARS ];
 
 #ifdef SPECTRUM_TEST
 const float * SPECTRUM_DebugBandPower( void ) { return s_bandPow; }
@@ -54,9 +47,9 @@ static void buildBands( void ) {
 	if ( fHigh > fMax ) fHigh = fMax;
 	ratio = fHigh / fLow;
 
-	for ( int b = 0; b < s_bars; b++ ) {
-		float fl = fLow * powf( ratio, (float)b / (float)s_bars );
-		float fh = fLow * powf( ratio, (float)( b + 1 ) / (float)s_bars );
+	for ( int b = 0; b < s_bands; b++ ) {
+		float fl = fLow * powf( ratio, (float)b / (float)s_bands );
+		float fh = fLow * powf( ratio, (float)( b + 1 ) / (float)s_bands );
 
 		s_band[ b ].f_lo = fl;
 		s_band[ b ].f_hi = fh;
@@ -67,34 +60,7 @@ static void buildBands( void ) {
 /* Pasma + konfiguracja aktywnego silnika (zeruje jego stan). */
 static void applyConfig( void ) {
 	buildBands();
-	kEngine[ s_engine ]->configure( s_fs, s_band, s_bars, s_channels );
-}
-// ---------------------------------------------------------------------------------------------
-static void computeFall( void ) {
-	float frame_s = (float)HOP / (float)s_fs;                       /* czas jednej ramki */
-	float full_s = (float)kFallMs[ s_fallIdx ] * 0.001f;            /* czas opadania z pełnej skali */
-	int f = (int)( 255.0f * frame_s / full_s + 0.5f );
-
-	s_fallPerFrame = ( f < 1 ) ? 1 : f;
-}
-// ---------------------------------------------------------------------------------------------
-int SPECTRUM_FallSteps( void ) {
-	return FALL_STEPS;
-}
-// ---------------------------------------------------------------------------------------------
-void SPECTRUM_SetFall( int idx ) {
-	if ( idx < 0 ) idx = 0;
-	if ( idx > FALL_STEPS - 1 ) idx = FALL_STEPS - 1;
-	s_fallIdx = idx;
-	computeFall();
-}
-// ---------------------------------------------------------------------------------------------
-int SPECTRUM_GetFall( void ) {
-	return s_fallIdx;
-}
-// ---------------------------------------------------------------------------------------------
-uint32_t SPECTRUM_GetFallMs( void ) {
-	return kFallMs[ s_fallIdx ];
+	kEngine[ s_engine ]->configure( s_fs, s_band, s_bands, s_channels );
 }
 // ---------------------------------------------------------------------------------------------
 void SPECTRUM_Init( uint32_t sample_rate ) {
@@ -104,7 +70,6 @@ void SPECTRUM_Init( uint32_t sample_rate ) {
 	s_wr = 0;
 	s_lastWr = 0;
 	s_fs = sample_rate ? sample_rate : 44100;
-	SPECTRUM_SetFall( s_fallIdx );   /* przelicz krok opadania dla bieżącej częstotliwości */
 	applyConfig();
 	SPECTRUM_Reset();
 }
@@ -112,7 +77,6 @@ void SPECTRUM_Init( uint32_t sample_rate ) {
 void SPECTRUM_SetRate( uint32_t sample_rate ) {
 	if ( sample_rate == 0 || sample_rate == s_fs ) return;
 	s_fs = sample_rate;
-	computeFall();
 	applyConfig();
 	SPECTRUM_Reset();
 }
@@ -136,32 +100,32 @@ void SPECTRUM_Feed( const int16_t * stereo, uint32_t frames ) {
 	s_wr = wr + frames;
 }
 // ---------------------------------------------------------------------------------------------
-void SPECTRUM_Configure( int channels, int bars ) {
-	int maxBars;
+void SPECTRUM_Configure( int channels, int bands ) {
+	int maxBands;
 
 	if ( channels < 1 ) channels = 1;
 	if ( channels > SPECTRUM_MAX_CHANNELS ) channels = SPECTRUM_MAX_CHANNELS;
-	maxBars = SPECTRUM_MAX_BARS / channels;
-	if ( bars < 1 ) bars = 1;
-	if ( bars > maxBars ) bars = maxBars;
-	if ( channels == s_channels && bars == s_bars ) return;
+	maxBands = SPECTRUM_MAX_BANDS / channels;
+	if ( bands < 1 ) bands = 1;
+	if ( bands > maxBands ) bands = maxBands;
+	if ( channels == s_channels && bands == s_bands ) return;
 	if ( channels != s_channels ) memset( g_spectrumRing, 0, sizeof( g_spectrumRing ) );   /* bufory zmieniają znaczenie (miks <-> L/R) */
 	s_channels = channels;
-	s_bars = bars;
+	s_bands = bands;
 	applyConfig();
 	SPECTRUM_Reset();
 }
 // ---------------------------------------------------------------------------------------------
-void SPECTRUM_SetBars( int bars ) {
-	SPECTRUM_Configure( s_channels, bars );
+void SPECTRUM_SetBands( int bands ) {
+	SPECTRUM_Configure( s_channels, bands );
 }
 // ---------------------------------------------------------------------------------------------
-int SPECTRUM_GetBars( void ) {
-	return s_bars;
+int SPECTRUM_GetBands( void ) {
+	return s_bands;
 }
 // ---------------------------------------------------------------------------------------------
 void SPECTRUM_SetChannels( int channels ) {
-	SPECTRUM_Configure( channels, s_bars );   /* liczba słupków zostanie ograniczona, jeśli się nie mieści */
+	SPECTRUM_Configure( channels, s_bands );   /* liczba pasm zostanie ograniczona, jeśli się nie mieści */
 }
 // ---------------------------------------------------------------------------------------------
 int SPECTRUM_GetChannels( void ) {
@@ -187,9 +151,6 @@ const char * SPECTRUM_EngineName( int engine ) {
 }
 // ---------------------------------------------------------------------------------------------
 void SPECTRUM_Reset( void ) {
-	memset( s_level, 0, sizeof( s_level ) );
-	memset( s_peak, 0, sizeof( s_peak ) );
-	memset( s_hold, 0, sizeof( s_hold ) );
 	kEngine[ s_engine ]->reset();
 	s_lastWr = SpectrumRing_Wr();   /* analiza zaczyna od próbek, które przyjdą po resecie */
 }
@@ -197,40 +158,7 @@ void SPECTRUM_Reset( void ) {
 void SPECTRUM_Resync( void ) {
 	memset( g_spectrumRing, 0, sizeof( g_spectrumRing ) );   /* okno FFT nie może mieszać próbek sprzed i po przerwie */
 	kEngine[ s_engine ]->reset();
-	s_lastWr = s_wr;   /* analiza zaczyna od próbek, które przyjdą po przerwie; słupki zostają */
-}
-// ---------------------------------------------------------------------------------------------
-/* Moc pasm -> słupki: dB, skala 0..255, szybkie narastanie, wolne opadanie, kreska szczytu. */
-static void updateBars( void ) {
-	int total = s_channels * s_bars;
-
-	for ( int b = 0; b < total; b++ ) {
-		float db = 10.0f * log10f( s_bandPow[ b ] + 1e-12f );
-		int target, lvl = s_level[ b ];
-
-		target = (int)( ( db - (float)SPECTRUM_DB_FLOOR ) * ( 255.0f / (float)( SPECTRUM_DB_TOP - SPECTRUM_DB_FLOOR ) ) + 0.5f );
-		if ( target < 0 ) target = 0;
-		if ( target > 255 ) target = 255;
-
-		/* szybkie narastanie, wolne opadanie */
-		if ( target >= lvl ) lvl = target;
-		else {
-			lvl -= s_fallPerFrame;
-			if ( lvl < target ) lvl = target;
-		}
-		s_level[ b ] = lvl;
-
-		/* kreska szczytu: podtrzymanie, potem wolne opadanie */
-		if ( lvl >= s_peak[ b ] ) {
-			s_peak[ b ] = lvl;
-			s_hold[ b ] = SPECTRUM_PEAK_HOLD;
-		} else if ( s_hold[ b ] > 0 ) {
-			s_hold[ b ]--;
-		} else {
-			s_peak[ b ] -= SPECTRUM_PEAK_FALL;
-			if ( s_peak[ b ] < lvl ) s_peak[ b ] = lvl;
-		}
-	}
+	s_lastWr = s_wr;   /* analiza zaczyna od próbek, które przyjdą po przerwie */
 }
 // ---------------------------------------------------------------------------------------------
 int SPECTRUM_Process( void ) {
@@ -242,13 +170,10 @@ int SPECTRUM_Process( void ) {
 	s_lastBlock = wr - from;
 	ok = kEngine[ s_engine ]->process( from, wr, s_bandPow );
 	s_lastWr = wr;
-	if ( !ok ) return 0;
-
-	updateBars();
-	return 1;
+	return ok ? 1 : 0;
 }
 // ---------------------------------------------------------------------------------------------
-/* Benchmark: ten sam kod co SPECTRUM_Process, ale na ostatnich HOP próbkach i bez wpływu na słupki. */
+/* Benchmark: ten sam kod co SPECTRUM_Process, ale na ostatnich HOP próbkach i bez wpływu na kolejne ramki. */
 int SPECTRUM_Bench( void ) {
 	uint32_t wr = SpectrumRing_Wr();
 
@@ -259,11 +184,6 @@ uint32_t SPECTRUM_GetLastBlock( void ) {
 	return s_lastBlock;
 }
 // ---------------------------------------------------------------------------------------------
-void SPECTRUM_GetFrame( uint8_t * level, uint8_t * peak ) {
-	int total = s_channels * s_bars;
-
-	for ( int b = 0; b < total; b++ ) {
-		level[ b ] = (uint8_t)s_level[ b ];
-		peak[ b ] = (uint8_t)s_peak[ b ];
-	}
+void SPECTRUM_GetPower( float * power ) {
+	memcpy( power, s_bandPow, (size_t)( s_channels * s_bands ) * sizeof( float ) );
 }

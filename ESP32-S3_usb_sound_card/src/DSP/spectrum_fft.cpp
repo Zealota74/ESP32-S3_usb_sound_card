@@ -3,7 +3,7 @@
  * Pasmo = suma mocy binów (pasmo węższe niż bin: interpolacja liniowa mocy między sąsiednimi binami).
  * Opcjonalnie (SPECTRUM_SetFftQ / SPECTRUM_FFT_Q): pasmo = średnia ważona mocy binów z jądrem trójkątnym
  * o szerokości połówkowej f0/Q. Wszystkie pasma dostają wtedy tę samą dobroć (nie węższą niż rozdzielczość
- * FFT), więc słupki nachodzą na siebie jak w analizatorze o niskim Q (podobny wygląd jak bank IIR).
+ * FFT), więc pasma nachodzą na siebie jak w analizatorze o niskim Q (podobny wygląd jak bank IIR).
  * Pamięć (N = 4096): tablice sin/cos 16 kB, bufor FFT 16 kB, moce binów 8 kB (ring jest wspólny).
  * Kanały (stereo) liczone są kolejno w tych samych buforach roboczych: drugi kanał nie zwiększa pamięci ani nie zmienia
  * wyniku pierwszego, a koszt rośnie proporcjonalnie do liczby kanałów (jedna FFT na kanał, niezależnie od liczby pasm).
@@ -34,8 +34,8 @@ typedef struct {
 	float norm;        /* tryb jądra: Nb / suma wag, Nb = szerokość pasma nominalnego w binach */
 } FftBand_t;
 
-static FftBand_t s_fb[ SPECTRUM_MAX_BARS ];
-static int       s_bars = 0;
+static FftBand_t s_fb[ SPECTRUM_MAX_BANDS ];
+static int       s_bands = 0;
 static int       s_channels = 1;
 static uint32_t  s_fs = 44100;
 static const SpectrumBand_t * s_bandSrc = NULL;   /* pasma wspólne (statyczne w spectrum.cpp) */
@@ -63,7 +63,7 @@ static void fftBuildBands( void ) {
 	if ( band == NULL ) return;
 	if ( q < 0.0f ) q = band[ 0 ].f0 / ( FFT_MIN_BINS * df );     /* auto: dobroć najniższego pasma przy limicie rozdzielczości */
 
-	for ( int b = 0; b < s_bars; b++ ) {
+	for ( int b = 0; b < s_bands; b++ ) {
 		int i0 = (int)ceilf( band[ b ].f_lo / df );
 		int i1 = (int)ceilf( band[ b ].f_hi / df ) - 1;
 		float pos = band[ b ].f0 / df;
@@ -101,10 +101,10 @@ static void fftBuildBands( void ) {
 	}
 }
 // ---------------------------------------------------------------------------------------------
-static void fftConfigure( uint32_t fs, const SpectrumBand_t * band, int bars, int channels ) {
+static void fftConfigure( uint32_t fs, const SpectrumBand_t * band, int bands, int channels ) {
 	s_fs = fs;
 	s_bandSrc = band;
-	s_bars = bars;
+	s_bands = bands;
 	s_channels = channels;
 	fftBuildBands();
 }
@@ -162,7 +162,7 @@ static void fftComplex( void ) {
 	}
 }
 // ---------------------------------------------------------------------------------------------
-/* Analizuje jeden kanał: N próbek bufora 'ring' od numeru 'start' (okno przesuwane). Wynik: power[0..s_bars-1]. */
+/* Analizuje jeden kanał: N próbek bufora 'ring' od numeru 'start' (okno przesuwane). Wynik: power[0..s_bands-1]. */
 static int fftChannel( const int16_t * ring, uint32_t start, float * power ) {
 	const float norm = 1.0f / ( (float)N * 0.25f * 32768.0f );   /* sinus pełnej skali -> 1.0 w binie */
 	const float norm2 = norm * norm;
@@ -197,7 +197,7 @@ static int fftChannel( const int16_t * ring, uint32_t start, float * power ) {
 	}
 
 	/* pasma: suma mocy binów (pasmo węższe niż bin: interpolacja liniowa mocy) albo jądro trójkątne */
-	for ( int b = 0; b < s_bars; b++ ) {
+	for ( int b = 0; b < s_bands; b++ ) {
 		float p = 0.0f;
 
 		if ( s_q != 0.0f ) {
@@ -226,7 +226,7 @@ static int fftProcess( uint32_t from, uint32_t to, float * power ) {
 
 	(void)from;
 	for ( int ch = 0; ch < s_channels; ch++ ) {
-		if ( !fftChannel( g_spectrumRing[ ch ], start, power + ch * s_bars ) ) return 0;
+		if ( !fftChannel( g_spectrumRing[ ch ], start, power + ch * s_bands ) ) return 0;
 	}
 	return 1;
 }

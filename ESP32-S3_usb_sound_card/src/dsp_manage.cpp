@@ -17,7 +17,7 @@
 #include "DSP/dsp_config.h"
 #include "DSP/spectrum.h"
 
-static_assert( DSP_SPECTRUM_MAX_BARS == SPECTRUM_MAX_BARS, "DSP_SPECTRUM_MAX_BARS musi byc rowne SPECTRUM_MAX_BARS" );
+static_assert( DSP_SPECTRUM_MAX_BANDS == SPECTRUM_MAX_BANDS, "DSP_SPECTRUM_MAX_BANDS musi byc rowne SPECTRUM_MAX_BANDS" );
 
 /* Widmo: liczone w loop (DSP_Poll), tylko gdy włączone. Gdy wyłączone, tap nic nie kopiuje. */
 static volatile bool s_spectrumOn = false;
@@ -53,7 +53,7 @@ static uint32_t          s_backlogMax = 0;   /* największa zaległość (ramki)
 static uint32_t          s_gaps = 0;         /* liczba luk (porzuconych zaległości) od DSP_Init */
 
 // ---------------------------------------------------------------------------------------------
-/* Zaczyna nowe okno pomiaru czasu widma (po zmianie liczby słupków, częstotliwości, włączeniu widma). */
+/* Zaczyna nowe okno pomiaru czasu widma (po zmianie liczby pasm, częstotliwości, włączeniu widma). */
 static void fftStatReset( void ) {
 	s_fftAccUs = 0;
 	s_fftAccN = 0;
@@ -74,7 +74,7 @@ static void dspTap( const int16_t * stereo, uint32_t frames ) {
 	__atomic_store_n( &s_qWr, wr + frames, __ATOMIC_RELEASE );   /* dane muszą być widoczne przed przesunięciem s_qWr */
 }
 // ---------------------------------------------------------------------------------------------
-/* Luka w strumieniu: porzuca zaległość i resetuje analizator (słupki opadają same). */
+/* Luka w strumieniu: porzuca zaległość i resetuje analizator (kolejne ramki są liczone od nowa). */
 static void queueGap( uint32_t wr ) {
 	s_qRd = wr;
 	s_gaps++;
@@ -176,13 +176,13 @@ void DSP_SpectrumEnable( int on ) {
 	s_spectrumOn = ( on != 0 );
 }
 // ---------------------------------------------------------------------------------------------
-void DSP_SpectrumSetBars( int bars ) {
-	SPECTRUM_SetBars( bars );
+void DSP_SpectrumSetBands( int bands ) {
+	SPECTRUM_SetBands( bands );
 	fftStatReset();
 }
 // ---------------------------------------------------------------------------------------------
-int DSP_SpectrumGetBars( void ) {
-	return SPECTRUM_GetBars();
+int DSP_SpectrumGetBands( void ) {
+	return SPECTRUM_GetBands();
 }
 // ---------------------------------------------------------------------------------------------
 void DSP_SpectrumSetChannels( int channels ) {
@@ -194,51 +194,17 @@ int DSP_SpectrumGetChannels( void ) {
 	return SPECTRUM_GetChannels();
 }
 // ---------------------------------------------------------------------------------------------
-void DSP_SpectrumConfigure( int channels, int bars ) {
-	SPECTRUM_Configure( channels, bars );
+void DSP_SpectrumConfigure( int channels, int bands ) {
+	SPECTRUM_Configure( channels, bands );
 	fftStatReset();
 }
 // ---------------------------------------------------------------------------------------------
-void DSP_SpectrumCycleBars( int dir ) {
-	static const int opts[] = { 7, 16, 32, 64 };
-	const int n = (int)( sizeof( opts ) / sizeof( opts[ 0 ] ) );
-	int limit = SPECTRUM_MAX_BARS / SPECTRUM_GetChannels();   /* kanały x słupki <= SPECTRUM_MAX_BARS */
-	int cur = SPECTRUM_GetBars();
-	int idx = 1;
-
-	for ( int i = 0; i < n; i++ ) {
-		if ( opts[ i ] == cur ) idx = i;
-	}
-	for ( int step = 0; step < n; step++ ) {
-		idx = ( idx + ( dir >= 0 ? 1 : n - 1 ) ) % n;
-		if ( opts[ idx ] <= limit ) break;
-	}
-	SPECTRUM_SetBars( opts[ idx ] );
-	fftStatReset();
-}
-// ---------------------------------------------------------------------------------------------
-void DSP_SpectrumFallStep( int dir ) {
-	SPECTRUM_SetFall( SPECTRUM_GetFall() + ( dir >= 0 ? 1 : -1 ) );
-}
-// ---------------------------------------------------------------------------------------------
-int DSP_SpectrumGetFallMs( void ) {
-	return (int)SPECTRUM_GetFallMs();
-}
-// ---------------------------------------------------------------------------------------------
-int DSP_SpectrumFallIndex( void ) {
-	return SPECTRUM_GetFall();
-}
-// ---------------------------------------------------------------------------------------------
-int DSP_SpectrumFallSteps( void ) {
-	return SPECTRUM_FallSteps();
-}
-// ---------------------------------------------------------------------------------------------
-int DSP_GetSpectrum( DSP_Spectrum_t * out ) {
+int DSP_GetBandPower( DSP_Bands_t * out ) {
 	if ( s_spectrumSeq == s_spectrumReadSeq ) return 0;
 	s_spectrumReadSeq = s_spectrumSeq;
-	out->bars = (uint8_t)SPECTRUM_GetBars();
 	out->channels = (uint8_t)SPECTRUM_GetChannels();
-	SPECTRUM_GetFrame( out->level, out->peak );
+	out->bands = (uint8_t)SPECTRUM_GetBands();
+	SPECTRUM_GetPower( out->power );
 	return 1;
 }
 // ---------------------------------------------------------------------------------------------

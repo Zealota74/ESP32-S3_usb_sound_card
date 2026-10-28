@@ -14,7 +14,7 @@
  * Skala wyjścia i detektor energii identyczne jak w spectrum_iir.cpp. Faza decymacji jest zapamiętana
  * między wywołaniami, więc dowolna liczba próbek w bloku jest dopuszczalna.
  *
- * Kanały (stereo): stan pasm i decymatorów jest osobny dla każdego kanału (kanały x pasma <= SPECTRUM_MAX_BARS),
+ * Kanały (stereo): stan pasm i decymatorów jest osobny dla każdego kanału (kanały x pasma <= SPECTRUM_MAX_BANDS),
  * współczynniki te same. Koszt decymatorów rośnie z liczbą kanałów, koszt pasm z ich łączną liczbą.
  */
 #include <math.h>
@@ -62,8 +62,8 @@ typedef struct {
 	uint8_t  stage;               /* stopień decymacji, na którym liczone jest pasmo */
 } MrBand_t;
 
-static MrBand_t s_mb[ SPECTRUM_MAX_BARS ];                  /* indeks: kanał * s_bars + pasmo */
-static int      s_bars = 0;
+static MrBand_t s_mb[ SPECTRUM_MAX_BANDS ];                  /* indeks: kanał * s_bands + pasmo */
+static int      s_bands = 0;
 static int      s_channels = 1;
 static int      s_stages = 1;                              /* liczba używanych stopni */
 static SpectrumBq_t s_lp[ SPECTRUM_MAX_CHANNELS ][ MR_MAX_STAGES ][ LP_SECTIONS ];   /* decymator ze stopnia k na k+1, osobny na kanał */
@@ -83,7 +83,7 @@ static void mrInit( void ) {
 }
 // ---------------------------------------------------------------------------------------------
 static void mrReset( void ) {
-	for ( int b = 0; b < s_bars * s_channels; b++ ) {
+	for ( int b = 0; b < s_bands * s_channels; b++ ) {
 		for ( int s = 0; s < SECTIONS; s++ ) s_mb[ b ].sec[ s ].z1 = s_mb[ b ].sec[ s ].z2 = 0.0f;
 		s_mb[ b ].e = 0.0f;
 	}
@@ -95,7 +95,7 @@ static void mrReset( void ) {
 	}
 }
 // ---------------------------------------------------------------------------------------------
-static void mrConfigure( uint32_t fs, const SpectrumBand_t * band, int bars, int channels ) {
+static void mrConfigure( uint32_t fs, const SpectrumBand_t * band, int bands, int channels ) {
 	double bwScale, enbwRatio;
 	float tauMin = (float)SPECTRUM_IIR_TAU_MIN_MS * 0.001f;
 
@@ -106,10 +106,10 @@ static void mrConfigure( uint32_t fs, const SpectrumBand_t * band, int bars, int
 		for ( int k = 0; k < MR_MAX_STAGES; k++ ) memcpy( s_lp[ ch ][ k ], kLpProto, sizeof( kLpProto ) );
 	}
 
-	s_bars = bars;
+	s_bands = bands;
 	s_channels = channels;
 	s_stages = 1;
-	for ( int b = 0; b < bars; b++ ) {
+	for ( int b = 0; b < bands; b++ ) {
 		int k = 0;
 		double fsk;
 		float tau = (float)SPECTRUM_IIR_TAU_CYCLES / band[ b ].f0;
@@ -130,7 +130,7 @@ static void mrConfigure( uint32_t fs, const SpectrumBand_t * band, int bars, int
 		s_mb[ b ].alpha = (float)( 1.0 - beta );
 		s_mb[ b ].e = 0.0f;
 	}
-	for ( int ch = 1; ch < channels; ch++ ) memcpy( &s_mb[ ch * bars ], &s_mb[ 0 ], (size_t)bars * sizeof( MrBand_t ) );   /* te same filtry, osobny stan */
+	for ( int ch = 1; ch < channels; ch++ ) memcpy( &s_mb[ ch * bands ], &s_mb[ 0 ], (size_t)bands * sizeof( MrBand_t ) );   /* te same filtry, osobny stan */
 	mrReset();
 }
 // ---------------------------------------------------------------------------------------------
@@ -177,14 +177,14 @@ static int mrProcess( uint32_t from, uint32_t to, float * power ) {
 
 		for ( int ch = 0; ch < s_channels; ch++ ) {
 			const int16_t * ring = g_spectrumRing[ ch ];
-			MrBand_t * mb = &s_mb[ ch * s_bars ];
+			MrBand_t * mb = &s_mb[ ch * s_bands ];
 			int c = cnt;
 
 			for ( int i = 0; i < cnt; i++ ) {
 				s_x[ i ] = (float)ring[ ( from + done + (uint32_t)i ) & SPECTRUM_RING_MASK ] * ( 1.0f / 32768.0f );
 			}
 			for ( int k = 0; k < s_stages && c > 0; k++ ) {
-				for ( int b = 0; b < s_bars; b++ ) {
+				for ( int b = 0; b < s_bands; b++ ) {
 					if ( mb[ b ].stage == k ) runBand( &mb[ b ], s_x, c );
 				}
 				if ( k < s_stages - 1 ) c = decimate( ch, k, c );
@@ -195,7 +195,7 @@ static int mrProcess( uint32_t from, uint32_t to, float * power ) {
 		mrReset();
 		return 0;
 	}
-	for ( int b = 0; b < s_bars * s_channels; b++ ) power[ b ] = s_gain * s_mb[ b ].e;
+	for ( int b = 0; b < s_bands * s_channels; b++ ) power[ b ] = s_gain * s_mb[ b ].e;
 	return 1;
 }
 // ---------------------------------------------------------------------------------------------

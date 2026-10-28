@@ -3,8 +3,8 @@
  * Nie dołączać poza modułem widma.
  *
  * Silnik dostaje zakres próbek z buforów kołowych (po jednym na kanał) i zwraca moc każdego pasma w skali:
- * sinus pełnej skali w środku pasma = 1.0 (0 dB). Dalsza obróbka (dB, słupki, opadanie,
- * kreska szczytu) jest wspólna i leży w spectrum.cpp, więc nowy silnik (np. CQT)
+ * sinus pełnej skali w środku pasma = 1.0 (0 dB). Dalsza obróbka na wygląd (dB, słupki, opadanie,
+ * kreska szczytu) należy do UI (ui_bars.*), więc nowy silnik (np. CQT)
  * implementuje wyłącznie SpectrumEngine_t.
  */
 #ifndef SPECTRUM_ENGINE_H
@@ -40,12 +40,12 @@ typedef struct {
 	/* Jednorazowo przy starcie: ciężkie tablice niezależne od pasm i częstotliwości. */
 	void ( * init )( void );
 	/* Po każdej zmianie fs / liczby pasm / kanałów / przełączeniu silnika. Zeruje stan silnika.
-	 * bars = pasma NA KANAŁ (band[0..bars-1] wspólne dla kanałów); channels * bars <= SPECTRUM_MAX_BARS. */
-	void ( * configure )( uint32_t fs, const SpectrumBand_t * band, int bars, int channels );
+	 * bands = pasma NA KANAŁ (band[0..bands-1] wspólne dla kanałów); channels * bands <= SPECTRUM_MAX_BANDS. */
+	void ( * configure )( uint32_t fs, const SpectrumBand_t * band, int bands, int channels );
 	/* Zeruje stan (filtry) bez zmiany konfiguracji. */
 	void ( * reset )( void );
 	/* Liczy moc pasm dla próbek o numerach [from, to) (liczniki rosnące, modulo 2^32).
-	 * Zwraca 1 i wypełnia power[kanał * bars + pasmo], albo 0 (dane niepewne: producent nadpisał bufor). */
+	 * Zwraca 1 i wypełnia power[kanał * bands + pasmo], albo 0 (dane niepewne: producent nadpisał bufor). */
 	int  ( * process )( uint32_t from, uint32_t to, float * power );
 } SpectrumEngine_t;
 
