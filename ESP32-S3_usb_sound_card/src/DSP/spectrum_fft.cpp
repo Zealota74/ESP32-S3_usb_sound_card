@@ -5,6 +5,8 @@
  * o szerokości połówkowej f0/Q. Wszystkie pasma dostają wtedy tę samą dobroć (nie węższą niż rozdzielczość
  * FFT), więc słupki nachodzą na siebie jak w analizatorze o niskim Q (podobny wygląd jak bank IIR).
  * Pamięć (N = 4096): tablice sin/cos 16 kB, bufor FFT 16 kB, moce binów 8 kB (ring jest wspólny).
+ * Kanały (stereo) liczone są kolejno w tych samych buforach roboczych: drugi kanał nie zwiększa pamięci ani nie zmienia
+ * wyniku pierwszego, a koszt rośnie proporcjonalnie do liczby kanałów (jedna FFT na kanał, niezależnie od liczby pasm).
  */
 #include <math.h>
 #include <string.h>
@@ -34,6 +36,7 @@ typedef struct {
 
 static FftBand_t s_fb[ SPECTRUM_MAX_BARS ];
 static int       s_bars = 0;
+static int       s_channels = 1;
 static uint32_t  s_fs = 44100;
 static const SpectrumBand_t * s_bandSrc = NULL;   /* pasma wspólne (statyczne w spectrum.cpp) */
 static float     s_q = SPECTRUM_FFT_Q;
@@ -98,10 +101,11 @@ static void fftBuildBands( void ) {
 	}
 }
 // ---------------------------------------------------------------------------------------------
-static void fftConfigure( uint32_t fs, const SpectrumBand_t * band, int bars ) {
+static void fftConfigure( uint32_t fs, const SpectrumBand_t * band, int bars, int channels ) {
 	s_fs = fs;
 	s_bandSrc = band;
 	s_bars = bars;
+	s_channels = channels;
 	fftBuildBands();
 }
 // ---------------------------------------------------------------------------------------------
@@ -158,19 +162,16 @@ static void fftComplex( void ) {
 	}
 }
 // ---------------------------------------------------------------------------------------------
-/* Analizuje ostatnie N próbek przed 'to'; 'from' nie jest potrzebne (okno przesuwane). */
-static int fftProcess( uint32_t from, uint32_t to, float * power ) {
+/* Analizuje jeden kanał: N próbek bufora 'ring' od numeru 'start' (okno przesuwane). Wynik: power[0..s_bars-1]. */
+static int fftChannel( const int16_t * ring, uint32_t start, float * power ) {
 	const float norm = 1.0f / ( (float)N * 0.25f * 32768.0f );   /* sinus pełnej skali -> 1.0 w binie */
 	const float norm2 = norm * norm;
-	uint32_t start = to - (uint32_t)N;
-
-	(void)from;
 
 	/* okno + upakowanie: z[m] = x[2m] + j*x[2m+1] */
 	for ( int m = 0; m < M; m++ ) {
 		int n0 = 2 * m, n1 = n0 + 1;
-		s_re[ m ] = (float)g_spectrumRing[ ( start + (uint32_t)n0 ) & SPECTRUM_RING_MASK ] * win( n0 );
-		s_im[ m ] = (float)g_spectrumRing[ ( start + (uint32_t)n1 ) & SPECTRUM_RING_MASK ] * win( n1 );
+		s_re[ m ] = (float)ring[ ( start + (uint32_t)n0 ) & SPECTRUM_RING_MASK ] * win( n0 );
+		s_im[ m ] = (float)ring[ ( start + (uint32_t)n1 ) & SPECTRUM_RING_MASK ] * win( n1 );
 	}
 	if ( (uint32_t)( SpectrumRing_Wr() - start ) > (uint32_t)SPECTRUM_RING_SIZE ) {   /* producent nadpisał dane w trakcie kopiowania */
 		return 0;
@@ -215,6 +216,17 @@ static int fftProcess( uint32_t from, uint32_t to, float * power ) {
 			p = s_pow[ ia ] * ( 1.0f - fr ) + s_pow[ ia + 1 ] * fr;
 		}
 		power[ b ] = p;
+	}
+	return 1;
+}
+// ---------------------------------------------------------------------------------------------
+/* Analizuje ostatnie N próbek przed 'to' w każdym kanale; 'from' nie jest potrzebne (okno przesuwane). */
+static int fftProcess( uint32_t from, uint32_t to, float * power ) {
+	uint32_t start = to - (uint32_t)N;
+
+	(void)from;
+	for ( int ch = 0; ch < s_channels; ch++ ) {
+		if ( !fftChannel( g_spectrumRing[ ch ], start, power + ch * s_bars ) ) return 0;
 	}
 	return 1;
 }

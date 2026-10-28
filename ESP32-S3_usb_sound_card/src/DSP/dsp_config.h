@@ -6,6 +6,11 @@
 #define DSP_CONFIG_H
 
 /* ---- Analizator widma ---- */
+/* Maksymalna liczba kanałów analizy: 1 = tylko miks mono (oszczędza 16 KB RAM), 2 = także L i R osobno.
+ * Łączny limit słupków (kanały x słupki) to SPECTRUM_MAX_BARS w spectrum.h. */
+#ifndef SPECTRUM_MAX_CHANNELS
+#define SPECTRUM_MAX_CHANNELS  2
+#endif
 #define SPECTRUM_FFT_N       4096    /* potęga 2; okno analizy (93 ms przy 44,1 kHz) */
 #define SPECTRUM_HOP         1024    /* co tyle nowych próbek liczymy FFT (512 = gładziej, 2x CPU) */
 #define SPECTRUM_F_LOW       30      /* Hz, dolna krawędź pierwszego pasma */

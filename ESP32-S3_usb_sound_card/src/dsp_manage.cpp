@@ -185,16 +185,34 @@ int DSP_SpectrumGetBars( void ) {
 	return SPECTRUM_GetBars();
 }
 // ---------------------------------------------------------------------------------------------
+void DSP_SpectrumSetChannels( int channels ) {
+	SPECTRUM_SetChannels( channels );
+	fftStatReset();
+}
+// ---------------------------------------------------------------------------------------------
+int DSP_SpectrumGetChannels( void ) {
+	return SPECTRUM_GetChannels();
+}
+// ---------------------------------------------------------------------------------------------
+void DSP_SpectrumConfigure( int channels, int bars ) {
+	SPECTRUM_Configure( channels, bars );
+	fftStatReset();
+}
+// ---------------------------------------------------------------------------------------------
 void DSP_SpectrumCycleBars( int dir ) {
 	static const int opts[] = { 7, 16, 32, 64 };
 	const int n = (int)( sizeof( opts ) / sizeof( opts[ 0 ] ) );
+	int limit = SPECTRUM_MAX_BARS / SPECTRUM_GetChannels();   /* kanały x słupki <= SPECTRUM_MAX_BARS */
 	int cur = SPECTRUM_GetBars();
 	int idx = 1;
 
 	for ( int i = 0; i < n; i++ ) {
 		if ( opts[ i ] == cur ) idx = i;
 	}
-	idx = ( idx + ( dir >= 0 ? 1 : n - 1 ) ) % n;
+	for ( int step = 0; step < n; step++ ) {
+		idx = ( idx + ( dir >= 0 ? 1 : n - 1 ) ) % n;
+		if ( opts[ idx ] <= limit ) break;
+	}
 	SPECTRUM_SetBars( opts[ idx ] );
 	fftStatReset();
 }
@@ -219,6 +237,7 @@ int DSP_GetSpectrum( DSP_Spectrum_t * out ) {
 	if ( s_spectrumSeq == s_spectrumReadSeq ) return 0;
 	s_spectrumReadSeq = s_spectrumSeq;
 	out->bars = (uint8_t)SPECTRUM_GetBars();
+	out->channels = (uint8_t)SPECTRUM_GetChannels();
 	SPECTRUM_GetFrame( out->level, out->peak );
 	return 1;
 }

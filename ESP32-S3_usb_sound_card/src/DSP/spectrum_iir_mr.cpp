@@ -13,6 +13,9 @@
  *
  * Skala wyjścia i detektor energii identyczne jak w spectrum_iir.cpp. Faza decymacji jest zapamiętana
  * między wywołaniami, więc dowolna liczba próbek w bloku jest dopuszczalna.
+ *
+ * Kanały (stereo): stan pasm i decymatorów jest osobny dla każdego kanału (kanały x pasma <= SPECTRUM_MAX_BARS),
+ * współczynniki te same. Koszt decymatorów rośnie z liczbą kanałów, koszt pasm z ich łączną liczbą.
  */
 #include <math.h>
 #include <string.h>
@@ -59,11 +62,12 @@ typedef struct {
 	uint8_t  stage;               /* stopień decymacji, na którym liczone jest pasmo */
 } MrBand_t;
 
-static MrBand_t s_mb[ SPECTRUM_MAX_BARS ];
+static MrBand_t s_mb[ SPECTRUM_MAX_BARS ];                  /* indeks: kanał * s_bars + pasmo */
 static int      s_bars = 0;
+static int      s_channels = 1;
 static int      s_stages = 1;                              /* liczba używanych stopni */
-static SpectrumBq_t s_lp[ MR_MAX_STAGES ][ LP_SECTIONS ];       /* decymator ze stopnia k na k+1 */
-static uint8_t  s_phase[ MR_MAX_STAGES ];                   /* indeks (0/1) następnej próbki do zachowania */
+static SpectrumBq_t s_lp[ SPECTRUM_MAX_CHANNELS ][ MR_MAX_STAGES ][ LP_SECTIONS ];   /* decymator ze stopnia k na k+1, osobny na kanał */
+static uint8_t  s_phase[ SPECTRUM_MAX_CHANNELS ][ MR_MAX_STAGES ];                   /* indeks (0/1) następnej próbki do zachowania */
 static float    s_x[ CHUNK ];                               /* wejście bieżącego stopnia */
 static float    s_t[ CHUNK ];                               /* wyjście decymatora przed odrzuceniem próbek */
 static float    s_y[ CHUNK ];                               /* wyjścia kolejnych sekcji jednego pasma */
@@ -79,26 +83,31 @@ static void mrInit( void ) {
 }
 // ---------------------------------------------------------------------------------------------
 static void mrReset( void ) {
-	for ( int b = 0; b < s_bars; b++ ) {
+	for ( int b = 0; b < s_bars * s_channels; b++ ) {
 		for ( int s = 0; s < SECTIONS; s++ ) s_mb[ b ].sec[ s ].z1 = s_mb[ b ].sec[ s ].z2 = 0.0f;
 		s_mb[ b ].e = 0.0f;
 	}
-	for ( int k = 0; k < MR_MAX_STAGES; k++ ) {
-		for ( int j = 0; j < LP_SECTIONS; j++ ) s_lp[ k ][ j ].z1 = s_lp[ k ][ j ].z2 = 0.0f;
-		s_phase[ k ] = 0;
+	for ( int ch = 0; ch < SPECTRUM_MAX_CHANNELS; ch++ ) {
+		for ( int k = 0; k < MR_MAX_STAGES; k++ ) {
+			for ( int j = 0; j < LP_SECTIONS; j++ ) s_lp[ ch ][ k ][ j ].z1 = s_lp[ ch ][ k ][ j ].z2 = 0.0f;
+			s_phase[ ch ][ k ] = 0;
+		}
 	}
 }
 // ---------------------------------------------------------------------------------------------
-static void mrConfigure( uint32_t fs, const SpectrumBand_t * band, int bars ) {
+static void mrConfigure( uint32_t fs, const SpectrumBand_t * band, int bars, int channels ) {
 	double bwScale, enbwRatio;
 	float tauMin = (float)SPECTRUM_IIR_TAU_MIN_MS * 0.001f;
 
 	SpectrumBp_CascadeScale( SECTIONS, &bwScale, &enbwRatio );
 	s_gain = (float)( 2.0 * HANN_ENBW / enbwRatio * pow( 10.0, (double)SPECTRUM_IIR_TRIM_DB / 10.0 ) );
 
-	for ( int k = 0; k < MR_MAX_STAGES; k++ ) memcpy( s_lp[ k ], kLpProto, sizeof( kLpProto ) );
+	for ( int ch = 0; ch < SPECTRUM_MAX_CHANNELS; ch++ ) {
+		for ( int k = 0; k < MR_MAX_STAGES; k++ ) memcpy( s_lp[ ch ][ k ], kLpProto, sizeof( kLpProto ) );
+	}
 
 	s_bars = bars;
+	s_channels = channels;
 	s_stages = 1;
 	for ( int b = 0; b < bars; b++ ) {
 		int k = 0;
@@ -121,6 +130,7 @@ static void mrConfigure( uint32_t fs, const SpectrumBand_t * band, int bars ) {
 		s_mb[ b ].alpha = (float)( 1.0 - beta );
 		s_mb[ b ].e = 0.0f;
 	}
+	for ( int ch = 1; ch < channels; ch++ ) memcpy( &s_mb[ ch * bars ], &s_mb[ 0 ], (size_t)bars * sizeof( MrBand_t ) );   /* te same filtry, osobny stan */
 	mrReset();
 }
 // ---------------------------------------------------------------------------------------------
@@ -137,20 +147,21 @@ static void runBand( MrBand_t * bd, const float * x, int cnt ) {
 #endif
 }
 // ---------------------------------------------------------------------------------------------
-/* Stopień k -> k+1: filtr dolnoprzepustowy, potem co druga próbka (z pamiętaną fazą). Wynik w s_x. Zwraca liczbę próbek. */
-static int decimate( int k, int cnt ) {
+/* Kanał ch, stopień k -> k+1: filtr dolnoprzepustowy, potem co druga próbka (z pamiętaną fazą). Wynik w s_x.
+ * Zwraca liczbę próbek. */
+static int decimate( int ch, int k, int cnt ) {
 	const float * in = s_x;
-	int ph = s_phase[ k ], m = 0;
+	int ph = s_phase[ ch ][ k ], m = 0;
 
 	for ( int j = 0; j < LP_SECTIONS; j++ ) {
-		SpectrumBq_Run( &s_lp[ k ][ j ], in, s_t, cnt );
+		SpectrumBq_Run( &s_lp[ ch ][ k ][ j ], in, s_t, cnt );
 		in = s_t;
 	}
 #ifdef SPECTRUM_TEST
 	g_dbgWorkMr += (uint32_t)cnt * LP_SECTIONS;
 #endif
 	for ( int i = ph; i < cnt; i += 2 ) s_x[ m++ ] = s_t[ i ];   /* zapis nie wyprzedza odczytu: m <= i */
-	s_phase[ k ] = (uint8_t)( ( ph + cnt ) & 1 );
+	s_phase[ ch ][ k ] = (uint8_t)( ( ph + cnt ) & 1 );
 	return m;
 }
 // ---------------------------------------------------------------------------------------------
@@ -164,21 +175,27 @@ static int mrProcess( uint32_t from, uint32_t to, float * power ) {
 	for ( uint32_t done = 0; done < n; done += CHUNK ) {
 		int cnt = (int)( ( n - done > CHUNK ) ? CHUNK : ( n - done ) );
 
-		for ( int i = 0; i < cnt; i++ ) {
-			s_x[ i ] = (float)g_spectrumRing[ ( from + done + (uint32_t)i ) & SPECTRUM_RING_MASK ] * ( 1.0f / 32768.0f );
-		}
-		for ( int k = 0; k < s_stages && cnt > 0; k++ ) {
-			for ( int b = 0; b < s_bars; b++ ) {
-				if ( s_mb[ b ].stage == k ) runBand( &s_mb[ b ], s_x, cnt );
+		for ( int ch = 0; ch < s_channels; ch++ ) {
+			const int16_t * ring = g_spectrumRing[ ch ];
+			MrBand_t * mb = &s_mb[ ch * s_bars ];
+			int c = cnt;
+
+			for ( int i = 0; i < cnt; i++ ) {
+				s_x[ i ] = (float)ring[ ( from + done + (uint32_t)i ) & SPECTRUM_RING_MASK ] * ( 1.0f / 32768.0f );
 			}
-			if ( k < s_stages - 1 ) cnt = decimate( k, cnt );
+			for ( int k = 0; k < s_stages && c > 0; k++ ) {
+				for ( int b = 0; b < s_bars; b++ ) {
+					if ( mb[ b ].stage == k ) runBand( &mb[ b ], s_x, c );
+				}
+				if ( k < s_stages - 1 ) c = decimate( ch, k, c );
+			}
 		}
 	}
 	if ( (uint32_t)( SpectrumRing_Wr() - from ) > (uint32_t)SPECTRUM_RING_SIZE ) {   /* producent nadpisał dane w trakcie liczenia */
 		mrReset();
 		return 0;
 	}
-	for ( int b = 0; b < s_bars; b++ ) power[ b ] = s_gain * s_mb[ b ].e;
+	for ( int b = 0; b < s_bars * s_channels; b++ ) power[ b ] = s_gain * s_mb[ b ].e;
 	return 1;
 }
 // ---------------------------------------------------------------------------------------------

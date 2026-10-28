@@ -22,7 +22,7 @@
 extern "C" {
 #endif
 
-#define SPECTRUM_MAX_BARS   64
+#define SPECTRUM_MAX_BARS   64      /* łączny limit słupków: kanały x słupki na kanał */
 
 #define SPECTRUM_ENGINE_FFT    0
 #define SPECTRUM_ENGINE_IIR    1
@@ -31,7 +31,8 @@ extern "C" {
 
 void SPECTRUM_Init(uint32_t sample_rate);
 
-/* Dopisuje ramki stereo int16 (L,R,L,R...) jako mono (L+R)/2. Wołać z tego samego wątku co SPECTRUM_Process(). */
+/* Dopisuje ramki stereo int16 (L,R,L,R...): w trybie 1 kanału jako miks mono (L+R)/2, w trybie 2 kanałów osobno L i R.
+ * Wołać z tego samego wątku co SPECTRUM_Process(). */
 void SPECTRUM_Feed(const int16_t *stereo, uint32_t frames);
 
 /* Zmiana częstotliwości próbkowania w czasie pracy: przelicza pasma i czas opadania, zeruje słupki.
@@ -51,9 +52,21 @@ const char *SPECTRUM_EngineName(int engine);   /* "FFT" / "IIR" / "IIR-MR", do w
 void  SPECTRUM_SetFftQ(float q);
 float SPECTRUM_GetFftQ(void);
 
-/* Liczba słupków 1..SPECTRUM_MAX_BARS (używane: 7, 16, 32). Zmiana zeruje słupki. */
+/* Kanały i słupki jednym wywołaniem (jedna przebudowa pasm i silnika).
+ * channels: 1 = miks mono (L+R)/2, 2 = L i R osobno (ograniczone do SPECTRUM_MAX_CHANNELS).
+ * bars = słupki NA KANAŁ, 1..SPECTRUM_MAX_BARS / channels (używane: 7, 16, 32, 64); wartości spoza zakresu są ograniczane,
+ * a odczyt (GetChannels/GetBars) zwraca wartości faktycznie ustawione. Zmiana zeruje słupki; zmiana liczby kanałów
+ * czyści też bufory próbek. */
+void SPECTRUM_Configure(int channels, int bars);
+
+/* Liczba słupków na kanał (jak wyżej, przy bieżącej liczbie kanałów). Zmiana zeruje słupki. */
 void SPECTRUM_SetBars(int bars);
 int  SPECTRUM_GetBars(void);
+
+/* Liczba kanałów (1 lub 2). Gdy bieżąca liczba słupków się nie mieści (kanały x słupki > SPECTRUM_MAX_BARS), jest zmniejszana;
+ * powrót do 1 kanału jej nie przywraca. */
+void SPECTRUM_SetChannels(int channels);
+int  SPECTRUM_GetChannels(void);
 
 /* Szybkość opadania słupków: indeks 0 = najwolniej ... SPECTRUM_FallSteps()-1 = najszybciej
  * (czasy z SPECTRUM_FALL_MS_LIST). SPECTRUM_SetFall ogranicza indeks do zakresu. */
@@ -81,7 +94,8 @@ uint32_t SPECTRUM_GetLastBlock(void);
  * zawołaj SPECTRUM_Reset(), bo stan filtrów IIR dostaje powtórnie te same próbki. Zwraca 1/0 jak SPECTRUM_Process. */
 int SPECTRUM_Bench(void);
 
-/* Poziomy 0..255 i szczyty 0..255 dla bieżącej liczby słupków (tablice min. SPECTRUM_MAX_BARS). */
+/* Poziomy 0..255 i szczyty 0..255 dla wszystkich kanałów: układ [kanał * bars + słupek], razem kanały x bars wartości
+ * (tablice min. SPECTRUM_MAX_BARS). */
 void SPECTRUM_GetFrame(uint8_t *level, uint8_t *peak);
 
 #ifdef SPECTRUM_TEST

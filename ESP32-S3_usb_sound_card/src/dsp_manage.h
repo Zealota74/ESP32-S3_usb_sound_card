@@ -30,18 +30,24 @@ void DSP_Init(void);
 void DSP_Poll(void);
 
 /* ---- Analizator widma ---- */
-#define DSP_SPECTRUM_MAX_BARS  64
+#define DSP_SPECTRUM_MAX_BARS  64            /* łącznie dla wszystkich kanałów: kanały x słupki na kanał */
 
 typedef struct {
-  uint8_t  bars;                              /* liczba słupków: 7, 16, 32 lub 64 */
-  uint8_t  level[DSP_SPECTRUM_MAX_BARS];      /* wysokość słupka 0..255 */
-  uint8_t  peak[DSP_SPECTRUM_MAX_BARS];       /* kreska szczytu 0..255 */
+  uint8_t  bars;                              /* liczba słupków NA KANAŁ: 7, 16, 32 lub 64 */
+  uint8_t  channels;                          /* 1 = miks mono (L+R)/2, 2 = L i R osobno */
+  uint8_t  level[DSP_SPECTRUM_MAX_BARS];      /* wysokość słupka 0..255, układ [kanał * bars + słupek] */
+  uint8_t  peak[DSP_SPECTRUM_MAX_BARS];       /* kreska szczytu 0..255, ten sam układ */
 } DSP_Spectrum_t;
 
 void DSP_SpectrumEnable(int on);              /* włącz tylko, gdy widmo jest wyświetlane */
-void DSP_SpectrumSetBars(int bars);           /* 7, 16, 32 lub 64 */
+void DSP_SpectrumSetBars(int bars);           /* słupki na kanał: 7, 16, 32 lub 64 (kanały x słupki <= DSP_SPECTRUM_MAX_BARS) */
 int  DSP_SpectrumGetBars(void);
-void DSP_SpectrumCycleBars(int dir);          /* +1 / -1: 7 -> 16 -> 32 -> 64 -> 7 (cyklicznie) */
+void DSP_SpectrumCycleBars(int dir);          /* +1 / -1: 7 -> 16 -> 32 -> 64 -> 7 (cyklicznie, tylko wartości mieszczące się w limicie) */
+/* Kanały: 1 = miks mono, 2 = L i R osobno. Gdy liczba słupków się nie mieści (np. 2 kanały po 64), jest zmniejszana.
+ * DSP_SpectrumConfigure ustawia oba naraz (jedna przebudowa). Odczyt zwraca wartości faktycznie ustawione. */
+void DSP_SpectrumSetChannels(int channels);
+int  DSP_SpectrumGetChannels(void);
+void DSP_SpectrumConfigure(int channels, int bars);
 int  DSP_GetSpectrum(DSP_Spectrum_t *out);    /* 1 = nowa ramka od ostatniego wywołania */
 void DSP_SpectrumFallStep(int dir);           /* +1 szybsze opadanie słupków, -1 wolniejsze (bez zawijania) */
 int  DSP_SpectrumGetFallMs(void);             /* czas opadania słupka z pełnej skali do zera (ms) */
@@ -54,7 +60,7 @@ int         DSP_SpectrumEngineCount(void);
 const char *DSP_SpectrumEngineName(int e);
 
 /* Czas silnika widma (FFT lub IIR) na jeden hop próbek SPECTRUM_HOP, us; średnia z ok. 0,5 s
- * (0 = jeszcze nie policzona). Dawniej AUDIO_Stats_t.fft_us.
+ * (0 = jeszcze nie policzona); obejmuje wszystkie kanały. Dawniej AUDIO_Stats_t.fft_us.
  * Budżet = hop / fs; obciążenie % = czas * fs / ( HOP * 1e4 ). */
 uint32_t DSP_SpectrumGetUs(void);
 

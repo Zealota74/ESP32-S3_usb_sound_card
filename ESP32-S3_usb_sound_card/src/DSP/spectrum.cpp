@@ -12,7 +12,7 @@
 #include "dsp_config.h"
 #include "spectrum_engine.h"
 
-int16_t                  g_spectrumRing[ SPECTRUM_RING_SIZE ];
+int16_t                  g_spectrumRing[ SPECTRUM_MAX_CHANNELS ][ SPECTRUM_RING_SIZE ];
 static uint32_t          s_wr = 0;          /* licznik zapisanych próbek */
 static uint32_t          s_lastWr = 0;      /* wartość s_wr przy ostatniej analizie */
 static uint32_t          s_lastBlock = 0;   /* ile próbek objęło ostatnie wywołanie silnika */
@@ -23,7 +23,8 @@ static int s_engine = SPECTRUM_ENGINE_DEFAULT;
 static uint32_t   s_fs = 44100;
 static SpectrumBand_t s_band[ SPECTRUM_MAX_BARS ];
 static float      s_bandPow[ SPECTRUM_MAX_BARS ];   /* moc pasm z silnika (sinus pełnej skali = 1.0) */
-static int        s_bars = 16;
+static int        s_bars = 16;                      /* słupki na kanał */
+static int        s_channels = 1;                   /* 1 = miks mono, 2 = L i R osobno; kanały x słupki <= SPECTRUM_MAX_BARS */
 
 static const uint16_t kFallMs[] = SPECTRUM_FALL_MS_LIST;
 #define FALL_STEPS ( (int)( sizeof( kFallMs ) / sizeof( kFallMs[ 0 ] ) ) )
@@ -66,7 +67,7 @@ static void buildBands( void ) {
 /* Pasma + konfiguracja aktywnego silnika (zeruje jego stan). */
 static void applyConfig( void ) {
 	buildBands();
-	kEngine[ s_engine ]->configure( s_fs, s_band, s_bars );
+	kEngine[ s_engine ]->configure( s_fs, s_band, s_bars, s_channels );
 }
 // ---------------------------------------------------------------------------------------------
 static void computeFall( void ) {
@@ -119,23 +120,52 @@ void SPECTRUM_SetRate( uint32_t sample_rate ) {
 void SPECTRUM_Feed( const int16_t * stereo, uint32_t frames ) {
 	uint32_t wr = s_wr;
 
-	for ( uint32_t i = 0; i < frames; i++ ) {
-		g_spectrumRing[ ( wr + i ) & SPECTRUM_RING_MASK ] = (int16_t)( ( (int32_t)stereo[ i * 2 ] + (int32_t)stereo[ i * 2 + 1 ] ) >> 1 );
+#if SPECTRUM_MAX_CHANNELS > 1
+	if ( s_channels > 1 ) {
+		for ( uint32_t i = 0; i < frames; i++ ) {
+			g_spectrumRing[ 0 ][ ( wr + i ) & SPECTRUM_RING_MASK ] = stereo[ i * 2 ];
+			g_spectrumRing[ 1 ][ ( wr + i ) & SPECTRUM_RING_MASK ] = stereo[ i * 2 + 1 ];
+		}
+	} else
+#endif
+	{
+		for ( uint32_t i = 0; i < frames; i++ ) {
+			g_spectrumRing[ 0 ][ ( wr + i ) & SPECTRUM_RING_MASK ] = (int16_t)( ( (int32_t)stereo[ i * 2 ] + (int32_t)stereo[ i * 2 + 1 ] ) >> 1 );
+		}
 	}
 	s_wr = wr + frames;
 }
 // ---------------------------------------------------------------------------------------------
-void SPECTRUM_SetBars( int bars ) {
+void SPECTRUM_Configure( int channels, int bars ) {
+	int maxBars;
+
+	if ( channels < 1 ) channels = 1;
+	if ( channels > SPECTRUM_MAX_CHANNELS ) channels = SPECTRUM_MAX_CHANNELS;
+	maxBars = SPECTRUM_MAX_BARS / channels;
 	if ( bars < 1 ) bars = 1;
-	if ( bars > SPECTRUM_MAX_BARS ) bars = SPECTRUM_MAX_BARS;
-	if ( bars == s_bars ) return;
+	if ( bars > maxBars ) bars = maxBars;
+	if ( channels == s_channels && bars == s_bars ) return;
+	if ( channels != s_channels ) memset( g_spectrumRing, 0, sizeof( g_spectrumRing ) );   /* bufory zmieniają znaczenie (miks <-> L/R) */
+	s_channels = channels;
 	s_bars = bars;
 	applyConfig();
 	SPECTRUM_Reset();
 }
 // ---------------------------------------------------------------------------------------------
+void SPECTRUM_SetBars( int bars ) {
+	SPECTRUM_Configure( s_channels, bars );
+}
+// ---------------------------------------------------------------------------------------------
 int SPECTRUM_GetBars( void ) {
 	return s_bars;
+}
+// ---------------------------------------------------------------------------------------------
+void SPECTRUM_SetChannels( int channels ) {
+	SPECTRUM_Configure( channels, s_bars );   /* liczba słupków zostanie ograniczona, jeśli się nie mieści */
+}
+// ---------------------------------------------------------------------------------------------
+int SPECTRUM_GetChannels( void ) {
+	return s_channels;
 }
 // ---------------------------------------------------------------------------------------------
 void SPECTRUM_SetEngine( int engine ) {
@@ -172,7 +202,9 @@ void SPECTRUM_Resync( void ) {
 // ---------------------------------------------------------------------------------------------
 /* Moc pasm -> słupki: dB, skala 0..255, szybkie narastanie, wolne opadanie, kreska szczytu. */
 static void updateBars( void ) {
-	for ( int b = 0; b < s_bars; b++ ) {
+	int total = s_channels * s_bars;
+
+	for ( int b = 0; b < total; b++ ) {
 		float db = 10.0f * log10f( s_bandPow[ b ] + 1e-12f );
 		int target, lvl = s_level[ b ];
 
@@ -228,7 +260,9 @@ uint32_t SPECTRUM_GetLastBlock( void ) {
 }
 // ---------------------------------------------------------------------------------------------
 void SPECTRUM_GetFrame( uint8_t * level, uint8_t * peak ) {
-	for ( int b = 0; b < s_bars; b++ ) {
+	int total = s_channels * s_bars;
+
+	for ( int b = 0; b < total; b++ ) {
 		level[ b ] = (uint8_t)s_level[ b ];
 		peak[ b ] = (uint8_t)s_peak[ b ];
 	}
