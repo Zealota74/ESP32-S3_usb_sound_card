@@ -12,8 +12,8 @@
 #ifndef SPECTRUM_MAX_CHANNELS
 #define SPECTRUM_MAX_CHANNELS  2
 #endif
-#define SPECTRUM_FFT_N       4096    /* potęga 2; okno analizy (93 ms przy 44,1 kHz) */
-#define SPECTRUM_HOP         1024    /* co tyle nowych próbek liczymy FFT (512 = gładziej, 2x CPU) */
+#define SPECTRUM_FFT_N       4096    /* potęga 2; MAKSYMALNE okno FFT (93 ms przy 44,1 kHz); okno robocze 1024..N wybiera się w menu */
+#define SPECTRUM_HOP         1024    /* co tyle nowych próbek liczymy FFT (512 = gładziej, 2x CPU); dla krótszych okien min( HOP, okno / 2 ) */
 #define SPECTRUM_F_LOW       30      /* Hz, dolna krawędź pierwszego pasma */
 #define SPECTRUM_F_HIGH      20000   /* Hz, górna krawędź ostatniego pasma */
 
@@ -23,7 +23,7 @@
  *   0 = FFT (jedna FFT, pasma = sumy binów; słaba rozdzielczość w basie),
  *   1 = bank filtrów IIR (pasmowe biquady o stałym Q, rozdzielczość bez zmian w całym paśmie),
  *   2 = bank IIR z decymacją oktawową (to samo co 1, ale tańszy przy dużej liczbie pasm). */
-#define SPECTRUM_ENGINE_DEFAULT  1
+#define SPECTRUM_ENGINE_DEFAULT  2
 /* Bank IIR: liczba kaskadowanych sekcji biquad na pasmo, 1..4 (1 = 2. rząd, -12 dB/okt; 2 = 4. rząd, -24 dB/okt).
  * Krawędzie pasma (-3 dB) zostają w tym samym miejscu, zmienia się tylko stromość zboczy i koszt CPU. */
 #define SPECTRUM_IIR_SECTIONS    2

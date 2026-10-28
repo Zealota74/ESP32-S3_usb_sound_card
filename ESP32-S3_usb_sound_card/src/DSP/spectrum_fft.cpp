@@ -1,5 +1,8 @@
 /*
- * spectrum_fft.cpp - silnik FFT: rzeczywista FFT N punktów liczona jako zespolona N/2 + post-processing.
+ * spectrum_fft.cpp - silnik FFT: rzeczywista FFT n punktów liczona jako zespolona n/2 + post-processing.
+ * Okno n jest ustawieniem czasu pracy (SPECTRUM_SetFftWindow): od SPECTRUM_FFT_WIN_MIN do SPECTRUM_FFT_N (potęgi dwójki).
+ * SPECTRUM_FFT_N jest więc tylko MAKSYMALNYM oknem: od niego zależą rozmiary buforów i ringu, a tablice sin/cos są liczone
+ * raz dla N i służą każdemu mniejszemu oknu z krokiem N/n (pamięć się nie zwiększa).
  * Pasmo = suma mocy binów (pasmo węższe niż bin: interpolacja liniowa mocy między sąsiednimi binami).
  * Opcjonalnie (SPECTRUM_SetFftQ / SPECTRUM_FFT_Q): pasmo = średnia ważona mocy binów z jądrem trójkątnym
  * o szerokości połówkowej f0/Q. Wszystkie pasma dostają wtedy tę samą dobroć (nie węższą niż rozdzielczość
@@ -13,7 +16,7 @@
 
 #include "spectrum_engine.h"
 
-#define N         (SPECTRUM_FFT_N)
+#define N         (SPECTRUM_FFT_N)            /* okno maksymalne (rozmiar buforów i tablic) */
 #define M         (N / 2)
 
 #define TWO_PI_D  6.283185307179586
@@ -21,6 +24,11 @@
 static float s_cos[ M + 1 ], s_sin[ M + 1 ];   /* cos/sin(2*pi*k/N), k = 0..M */
 static float s_re[ M ], s_im[ M ];
 static float s_pow[ M ];                    /* moc znormalizowana (pełna skala sinus = 1.0 w binie) */
+
+/* okno bieżące: s_n punktów (potęga 2, <= N), s_m = s_n / 2, s_r = N / s_n (krok po tablicy sin/cos) */
+static int s_n = N;
+static int s_m = M;
+static int s_r = 1;
 
 #ifndef SPECTRUM_FFT_Q
 #define SPECTRUM_FFT_Q   0.0f       /* 0 = pasma "cegiełkowe" (jak dotąd), > 0 = dobroć jądra, < 0 = automatycznie */
@@ -57,7 +65,8 @@ static void fftInit( void ) {
 // ---------------------------------------------------------------------------------------------
 static void fftBuildBands( void ) {
 	const SpectrumBand_t * band = s_bandSrc;
-	float df = (float)s_fs / (float)N;
+	float df = (float)s_fs / (float)s_n;
+	const int m = s_m;
 	float q = s_q;
 
 	if ( band == NULL ) return;
@@ -69,10 +78,10 @@ static void fftBuildBands( void ) {
 		float pos = band[ b ].f0 / df;
 
 		if ( i0 < 1 ) i0 = 1;
-		if ( i0 > M - 1 ) i0 = M - 1;
-		if ( i1 > M - 1 ) i1 = M - 1;
+		if ( i0 > m - 1 ) i0 = m - 1;
+		if ( i1 > m - 1 ) i1 = m - 1;
 		if ( pos < 1.0f ) pos = 1.0f;
-		if ( pos > (float)( M - 2 ) ) pos = (float)( M - 2 );
+		if ( pos > (float)( m - 2 ) ) pos = (float)( m - 2 );
 		s_fb[ b ].i0 = i0;
 		s_fb[ b ].i1 = i1;
 		s_fb[ b ].pos = pos;
@@ -90,7 +99,7 @@ static void fftBuildBands( void ) {
 			k0 = (int)ceilf( c - h );
 			k1 = (int)floorf( c + h );
 			if ( k0 < 1 ) k0 = 1;
-			if ( k1 > M - 1 ) k1 = M - 1;
+			if ( k1 > m - 1 ) k1 = m - 1;
 			for ( int k = k0; k <= k1; k++ ) sw += 1.0 - fabs( (double)k - (double)c ) / (double)h;
 			s_fb[ b ].i0 = k0;
 			s_fb[ b ].i1 = k1;
@@ -118,21 +127,43 @@ float SPECTRUM_GetFftQ( void ) {
 	return s_q;
 }
 // ---------------------------------------------------------------------------------------------
+/* Ustawia okno (zaokrąglone w dół do potęgi dwójki, w zakresie WIN_MIN..N), przebudowuje pasma. Zwraca okno faktycznie ustawione.
+ * Wołane przez SPECTRUM_SetFftWindow (spectrum.cpp), które dba o reset analizy i krok analizy (HOP). */
+int SpectrumFft_SetWindow( int n ) {
+	int mn = ( SPECTRUM_FFT_WIN_MIN < N ) ? SPECTRUM_FFT_WIN_MIN : N;
+	int p = mn;
+
+	if ( n > N ) n = N;
+	while ( p * 2 <= n ) p *= 2;
+	s_n = p;
+	s_m = p / 2;
+	s_r = N / p;
+	fftBuildBands();
+	return p;
+}
+// ---------------------------------------------------------------------------------------------
+int SPECTRUM_GetFftWindow( void ) {
+	return s_n;
+}
+// ---------------------------------------------------------------------------------------------
 static void fftReset( void ) {
 	/* FFT nie ma stanu między ramkami (okno bierze się wprost z bufora kołowego) */
 }
 // ---------------------------------------------------------------------------------------------
-/* Okno Hanna z tablicy cos: w(n) = 0.5 - 0.5*cos(2*pi*n/N), n = 0..N-1 */
-static inline float win( int n ) {
-	return 0.5f - 0.5f * ( ( n <= M ) ? s_cos[ n ] : s_cos[ N - n ] );
+/* Okno Hanna z tablicy cos: w(i) = 0.5 - 0.5*cos(2*pi*i/n), i = 0..n-1; tablica jest dla N, więc indeks to i * (N / n). */
+static inline float win( int i ) {
+	int k = i * s_r;
+
+	return 0.5f - 0.5f * ( ( k <= M ) ? s_cos[ k ] : s_cos[ N - k ] );
 }
 // ---------------------------------------------------------------------------------------------
-/* FFT zespolona M punktów, w miejscu, radix-2 DIT; twiddle z tablicy N-punktowej (krok N/len). */
+/* FFT zespolona m = n/2 punktów, w miejscu, radix-2 DIT; twiddle z tablicy N-punktowej (krok N/len, niezależny od n). */
 static void fftComplex( void ) {
+	const int m = s_m;
 	int i, j, bit;
 
-	for ( i = 1, j = 0; i < M; i++ ) {
-		bit = M >> 1;
+	for ( i = 1, j = 0; i < m; i++ ) {
+		bit = m >> 1;
 		for ( ; j & bit; bit >>= 1 ) j ^= bit;
 		j ^= bit;
 		if ( i < j ) {
@@ -140,11 +171,11 @@ static void fftComplex( void ) {
 			t = s_im[ i ]; s_im[ i ] = s_im[ j ]; s_im[ j ] = t;
 		}
 	}
-	for ( int len = 2; len <= M; len <<= 1 ) {
+	for ( int len = 2; len <= m; len <<= 1 ) {
 		int half = len >> 1;
 		int step = N / len;
 
-		for ( i = 0; i < M; i += len ) {
+		for ( i = 0; i < m; i += len ) {
 			for ( j = 0; j < half; j++ ) {
 				int k = j * step;
 				float wr = s_cos[ k ];
@@ -162,16 +193,17 @@ static void fftComplex( void ) {
 	}
 }
 // ---------------------------------------------------------------------------------------------
-/* Analizuje jeden kanał: N próbek bufora 'ring' od numeru 'start' (okno przesuwane). Wynik: power[0..s_bands-1]. */
+/* Analizuje jeden kanał: s_n próbek bufora 'ring' od numeru 'start' (okno przesuwane). Wynik: power[0..s_bands-1]. */
 static int fftChannel( const int16_t * ring, uint32_t start, float * power ) {
-	const float norm = 1.0f / ( (float)N * 0.25f * 32768.0f );   /* sinus pełnej skali -> 1.0 w binie */
+	const int n = s_n, m = s_m, r = s_r;
+	const float norm = 1.0f / ( (float)n * 0.25f * 32768.0f );   /* sinus pełnej skali -> 1.0 w binie */
 	const float norm2 = norm * norm;
 
-	/* okno + upakowanie: z[m] = x[2m] + j*x[2m+1] */
-	for ( int m = 0; m < M; m++ ) {
-		int n0 = 2 * m, n1 = n0 + 1;
-		s_re[ m ] = (float)ring[ ( start + (uint32_t)n0 ) & SPECTRUM_RING_MASK ] * win( n0 );
-		s_im[ m ] = (float)ring[ ( start + (uint32_t)n1 ) & SPECTRUM_RING_MASK ] * win( n1 );
+	/* okno + upakowanie: z[i] = x[2i] + j*x[2i+1] */
+	for ( int i = 0; i < m; i++ ) {
+		int n0 = 2 * i, n1 = n0 + 1;
+		s_re[ i ] = (float)ring[ ( start + (uint32_t)n0 ) & SPECTRUM_RING_MASK ] * win( n0 );
+		s_im[ i ] = (float)ring[ ( start + (uint32_t)n1 ) & SPECTRUM_RING_MASK ] * win( n1 );
 	}
 	if ( (uint32_t)( SpectrumRing_Wr() - start ) > (uint32_t)SPECTRUM_RING_SIZE ) {   /* producent nadpisał dane w trakcie kopiowania */
 		return 0;
@@ -182,14 +214,14 @@ static int fftChannel( const int16_t * ring, uint32_t start, float * power ) {
 
 	fftComplex();
 
-	/* rozdzielenie widm: X[k] = Xe[k] + W_N^k * Xo[k], k = 0..M-1 */
-	for ( int k = 0; k < M; k++ ) {
-		int mk = ( M - k ) & ( M - 1 );
+	/* rozdzielenie widm: X[k] = Xe[k] + W_n^k * Xo[k], k = 0..m-1 (W_n^k z tablicy N-punktowej: indeks k * N / n) */
+	for ( int k = 0; k < m; k++ ) {
+		int mk = ( m - k ) & ( m - 1 );
 		float xer = 0.5f * ( s_re[ k ] + s_re[ mk ] );
 		float xei = 0.5f * ( s_im[ k ] - s_im[ mk ] );
 		float xor_ = 0.5f * ( s_im[ k ] + s_im[ mk ] );
 		float xoi = -0.5f * ( s_re[ k ] - s_re[ mk ] );
-		float c = s_cos[ k ], s = s_sin[ k ];
+		float c = s_cos[ k * r ], s = s_sin[ k * r ];
 		float xr = xer + c * xor_ + s * xoi;
 		float xi = xei + c * xoi - s * xor_;
 
@@ -220,9 +252,9 @@ static int fftChannel( const int16_t * ring, uint32_t start, float * power ) {
 	return 1;
 }
 // ---------------------------------------------------------------------------------------------
-/* Analizuje ostatnie N próbek przed 'to' w każdym kanale; 'from' nie jest potrzebne (okno przesuwane). */
+/* Analizuje ostatnie s_n próbek przed 'to' w każdym kanale; 'from' nie jest potrzebne (okno przesuwane). */
 static int fftProcess( uint32_t from, uint32_t to, float * power ) {
-	uint32_t start = to - (uint32_t)N;
+	uint32_t start = to - (uint32_t)s_n;
 
 	(void)from;
 	for ( int ch = 0; ch < s_channels; ch++ ) {

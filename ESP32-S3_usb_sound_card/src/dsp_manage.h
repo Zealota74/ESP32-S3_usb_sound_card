@@ -52,6 +52,13 @@ void DSP_SpectrumSetChannels(int channels);
 int  DSP_SpectrumGetChannels(void);
 void DSP_SpectrumConfigure(int channels, int bands);
 
+/* Okno silnika FFT w próbkach (potęga dwójki, DSP_SpectrumFftWindowMin()..DSP_SpectrumFftWindowMax(); poza zakresem jest
+ * ograniczane, odczyt zwraca wartość faktycznie ustawioną). Dotyczy tylko silnika FFT. Krok analizy dobierany jest do okna. */
+void DSP_SpectrumSetFftWindow(int n);
+int  DSP_SpectrumGetFftWindow(void);
+int  DSP_SpectrumFftWindowMin(void);
+int  DSP_SpectrumFftWindowMax(void);
+
 int         DSP_SpectrumGetEngine(void);
 void        DSP_SpectrumSetEngine(int e);
 int         DSP_SpectrumEngineCount(void);

@@ -208,6 +208,23 @@ int DSP_GetBandPower( DSP_Bands_t * out ) {
 	return 1;
 }
 // ---------------------------------------------------------------------------------------------
+void DSP_SpectrumSetFftWindow( int n ) {
+	SPECTRUM_SetFftWindow( n );
+	fftStatReset();
+}
+// ---------------------------------------------------------------------------------------------
+int DSP_SpectrumGetFftWindow( void ) {
+	return SPECTRUM_GetFftWindow();
+}
+// ---------------------------------------------------------------------------------------------
+int DSP_SpectrumFftWindowMin( void ) {
+	return ( SPECTRUM_FFT_WIN_MIN < SPECTRUM_FFT_N ) ? SPECTRUM_FFT_WIN_MIN : SPECTRUM_FFT_N;
+}
+// ---------------------------------------------------------------------------------------------
+int DSP_SpectrumFftWindowMax( void ) {
+	return SPECTRUM_FFT_N;
+}
+// ---------------------------------------------------------------------------------------------
 int DSP_SpectrumGetEngine( void ) {
 	return SPECTRUM_GetEngine();
 }

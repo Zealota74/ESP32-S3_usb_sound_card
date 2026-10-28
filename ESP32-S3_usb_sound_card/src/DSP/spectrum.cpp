@@ -26,7 +26,8 @@ static float      s_bandPow[ SPECTRUM_MAX_BANDS ];   /* moc pasm z silnika (sinu
 static int        s_bands = 16;                      /* pasma na kanał */
 static int        s_channels = 1;                   /* 1 = miks mono, 2 = L i R osobno; kanały x pasma <= SPECTRUM_MAX_BANDS */
 
-#define HOP        ( SPECTRUM_HOP )
+/* Krok analizy (nowe próbki między ramkami): dla silnika FFT min( SPECTRUM_HOP, okno / 2 ), dla pozostałych SPECTRUM_HOP. */
+static uint32_t   s_hop = SPECTRUM_HOP;
 
 #ifdef SPECTRUM_TEST
 const float * SPECTRUM_DebugBandPower( void ) { return s_bandPow; }
@@ -61,6 +62,16 @@ static void buildBands( void ) {
 static void applyConfig( void ) {
 	buildBands();
 	kEngine[ s_engine ]->configure( s_fs, s_band, s_bands, s_channels );
+	s_hop = SPECTRUM_HOP;
+	if ( s_engine == SPECTRUM_ENGINE_FFT && (uint32_t)( SPECTRUM_GetFftWindow() / 2 ) < s_hop ) s_hop = (uint32_t)( SPECTRUM_GetFftWindow() / 2 );
+}
+// ---------------------------------------------------------------------------------------------
+void SPECTRUM_SetFftWindow( int n ) {
+	int before = SPECTRUM_GetFftWindow();
+
+	if ( SpectrumFft_SetWindow( n ) == before ) return;
+	applyConfig();                  /* przelicza HOP i przebudowuje aktywny silnik */
+	SPECTRUM_Reset();
 }
 // ---------------------------------------------------------------------------------------------
 void SPECTRUM_Init( uint32_t sample_rate ) {
@@ -166,18 +177,18 @@ int SPECTRUM_Process( void ) {
 	uint32_t from = s_lastWr;
 	int ok;
 
-	if ( (uint32_t)( wr - from ) < (uint32_t)HOP ) return 0;
+	if ( (uint32_t)( wr - from ) < s_hop ) return 0;
 	s_lastBlock = wr - from;
 	ok = kEngine[ s_engine ]->process( from, wr, s_bandPow );
 	s_lastWr = wr;
 	return ok ? 1 : 0;
 }
 // ---------------------------------------------------------------------------------------------
-/* Benchmark: ten sam kod co SPECTRUM_Process, ale na ostatnich HOP próbkach i bez wpływu na kolejne ramki. */
+/* Benchmark: ten sam kod co SPECTRUM_Process, ale na ostatnich s_hop próbkach i bez wpływu na kolejne ramki. */
 int SPECTRUM_Bench( void ) {
 	uint32_t wr = SpectrumRing_Wr();
 
-	return kEngine[ s_engine ]->process( wr - (uint32_t)HOP, wr, s_bandPow );
+	return kEngine[ s_engine ]->process( wr - s_hop, wr, s_bandPow );
 }
 // ---------------------------------------------------------------------------------------------
 uint32_t SPECTRUM_GetLastBlock( void ) {

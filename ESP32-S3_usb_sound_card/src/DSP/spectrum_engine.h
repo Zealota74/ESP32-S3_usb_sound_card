@@ -49,6 +49,9 @@ typedef struct {
 	int  ( * process )( uint32_t from, uint32_t to, float * power );
 } SpectrumEngine_t;
 
+/* Silnik FFT: zmiana okna (zwraca okno faktycznie ustawione); reset analizy i krok HOP robi SPECTRUM_SetFftWindow. */
+int SpectrumFft_SetWindow( int n );
+
 extern const SpectrumEngine_t g_spectrumEngineFft;
 extern const SpectrumEngine_t g_spectrumEngineIir;
 extern const SpectrumEngine_t g_spectrumEngineIirMr;

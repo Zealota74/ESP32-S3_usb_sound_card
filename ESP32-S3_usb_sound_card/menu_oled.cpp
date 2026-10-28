@@ -12,7 +12,7 @@
 #include "ui_bars.h"
 #include "menu_oled.h"
 
-typedef enum { MENU_BARS_CNT = 0, MENU_CHANNELS, MENU_BRIGHT, MENU_ENGINE, MENU_BARS_FALL, MENU_PEAK_FALL, MENU_COUNT } Menu_t;
+typedef enum { MENU_BARS_CNT = 0, MENU_CHANNELS, MENU_BRIGHT, MENU_ENGINE, MENU_FFT_WIN, MENU_BARS_FALL, MENU_PEAK_FALL, MENU_COUNT } Menu_t;
 
 static int s_menuItem = MENU_BARS_CNT;       /* ostatnio używane okienko */
 
@@ -49,6 +49,21 @@ static void cycleChannels( int dir ) {
 	BARS_Reset();
 }
 // ---------------------------------------------------------------------------------------------
+/* Okno FFT: potęgi dwójki od DSP_SpectrumFftWindowMin() do ...Max(), bez zawijania. Indeks = ile razy podwojono minimum. */
+static int fftWinIndex( int w ) {
+	int idx = 0;
+
+	for ( int x = DSP_SpectrumFftWindowMin(); x < w; x <<= 1 ) idx++;
+	return idx;
+}
+// ---------------------------------------------------------------------------------------------
+static void stepFftWindow( int dir ) {
+	int w = DSP_SpectrumGetFftWindow();
+
+	DSP_SpectrumSetFftWindow( ( dir > 0 ) ? w * 2 : w / 2 );   /* DSP ogranicza do zakresu */
+	BARS_Reset();
+}
+// ---------------------------------------------------------------------------------------------
 static const char * channelsName( void ) {
 	switch ( UI_GetSpecMode() ) {
 		case UI_SPEC_L:  return "L";
@@ -81,6 +96,17 @@ static void menuShow( void ) {
 			snprintf( t, sizeof( t ), "%d/%d ANALYSIS", MENU_ENGINE + 1, MENU_COUNT );
 			snprintf( v, sizeof( v ), "%s", DSP_SpectrumEngineName( DSP_SpectrumGetEngine() ) );
 			break;
+		case MENU_FFT_WIN: {
+			int w = DSP_SpectrumGetFftWindow();
+			uint32_t fs = AUDIO_GetSampleRate();
+
+			snprintf( t, sizeof( t ), "%d/%d FFT WINDOW", MENU_FFT_WIN + 1, MENU_COUNT );
+			if ( fs > 0 ) snprintf( v, sizeof( v ), "%d/%dms", w, (int)( (uint64_t)w * 1000u / fs ) );   /* próbki / czas okna */
+			else snprintf( v, sizeof( v ), "%d", w );
+			pos = fftWinIndex( w );
+			max = fftWinIndex( DSP_SpectrumFftWindowMax() );
+			break;
+		}
 		case MENU_BARS_FALL:
 			snprintf( t, sizeof( t ), "%d/%d SPECTRUM FALL", MENU_BARS_FALL + 1, MENU_COUNT );
 			snprintf( v, sizeof( v ), "%lu ms", (unsigned long)BARS_GetFallMs() );
@@ -118,6 +144,9 @@ static void menuChange( int steps ) {
 			BARS_Reset();                    /* nowy silnik zaczyna słupki od zera */
 			break;
 		}
+		case MENU_FFT_WIN:
+			stepFftWindow( dir );          /* obrót w prawo = dłuższe okno (lepszy bas, wolniejsza reakcja); bez zawijania; tylko silnik FFT */
+			break;
 		case MENU_BARS_FALL:
 			BARS_FallStep( -dir );         /* obrót w prawo = większa wartość (ms) = wolniejsze opadanie; bez zawijania */
 			break;

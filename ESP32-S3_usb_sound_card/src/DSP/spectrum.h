@@ -23,6 +23,7 @@ extern "C" {
 #endif
 
 #define SPECTRUM_MAX_BANDS  64      /* łączny limit pasm: kanały x pasma na kanał */
+#define SPECTRUM_FFT_WIN_MIN 1024   /* najkrótsze okno silnika FFT (próbki) */
 
 #define SPECTRUM_ENGINE_FFT    0
 #define SPECTRUM_ENGINE_IIR    1
@@ -51,6 +52,14 @@ const char *SPECTRUM_EngineName(int engine);   /* "FFT" / "IIR" / "IIR-MR", do w
  * Wołać z tego samego wątku co SPECTRUM_Process() (loop). Nie zeruje stanu analizy. */
 void  SPECTRUM_SetFftQ(float q);
 float SPECTRUM_GetFftQ(void);
+
+/* Okno silnika FFT w próbkach: potęga dwójki od SPECTRUM_FFT_WIN_MIN do SPECTRUM_FFT_N (wartość jest zaokrąglana w dół i
+ * ograniczana do tego zakresu; odczyt zwraca wartość faktycznie ustawioną). Dłuższe okno = lepsza rozdzielczość w częstotliwości
+ * (bas), krótsze = szybsza reakcja. Zmiana zeruje stan analizy. Dotyczy tylko silnika FFT (IIR i IIR-MR ignorują okno).
+ * Krok analizy (HOP) zależy od okna: min( SPECTRUM_HOP, okno / 2 ), więc okna nakładają się co najmniej w połowie.
+ * Wołać z tego samego wątku co SPECTRUM_Process() (loop). */
+void SPECTRUM_SetFftWindow(int n);
+int  SPECTRUM_GetFftWindow(void);
 
 /* Kanały i pasma jednym wywołaniem (jedna przebudowa pasm i silnika).
  * channels: 1 = miks mono (L+R)/2, 2 = L i R osobno (ograniczone do SPECTRUM_MAX_CHANNELS).
