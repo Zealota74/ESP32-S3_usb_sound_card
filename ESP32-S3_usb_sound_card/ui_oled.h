@@ -40,7 +40,7 @@ extern "C" {
 #define UI_OSD_DIM_MODE 2
 #endif
 #ifndef UI_OSD_DIM_GRAY
-#define UI_OSD_DIM_GRAY 4
+#define UI_OSD_DIM_GRAY 1
 #endif
 
 void UI_Init(void);
@@ -76,10 +76,27 @@ void UI_SetDebug(uint32_t audioBlock, uint32_t fifo, uint32_t usbPackets, uint32
 /* Surowa głośność z hosta (dB) - tylko do ekranu STAT. */
 void UI_SetHostDb(int host_db);
 
-/* Analizator widma: poziomy i szczyty 0..255 dla 'bars' słupków (1..UI_SPEC_MAX_BARS).
- * Wołać po każdej nowej ramce widma. */
+/* Analizator widma: poziomy i szczyty 0..255 dla 'channels' kanałów po 'bars' słupków, układ [kanał * bars + słupek]
+ * (łącznie channels * bars <= UI_SPEC_MAX_BARS). Wołać po każdej nowej ramce widma. */
 #define UI_SPEC_MAX_BARS   64   /* musi być równe DSP_SPECTRUM_MAX_BANDS (sprawdza audio_ui.cpp) */
-void UI_SetSpectrum(const uint8_t *level, const uint8_t *peak, int bars);
+void UI_SetSpectrum(const uint8_t *level, const uint8_t *peak, int bars, int channels);
+
+/* Tryb rysowania widma: MONO (jedno widmo, miks), tylko L, tylko R albo L i R nad sobą (kanał L u góry).
+ * Tryby L, R i L+R wymagają 2 kanałów z DSP, MONO wymaga 1 (ustawia to menu_oled i pilnuje audio_ui). */
+typedef enum {
+  UI_SPEC_MONO = 0,
+  UI_SPEC_L,
+  UI_SPEC_R,
+  UI_SPEC_LR,
+  UI_SPEC_MODE_COUNT
+} UI_SpecMode_t;
+void          UI_SetSpecMode(UI_SpecMode_t mode);
+UI_SpecMode_t UI_GetSpecMode(void);
+
+/* Układ L+R: każde widmo ma UI_SPEC_ROW_H pikseli wysokości, przerwa = 64 - 2 * UI_SPEC_ROW_H (domyślnie 4 px). */
+#ifndef UI_SPEC_ROW_H
+#define UI_SPEC_ROW_H      30
+#endif
 
 /* Ogólne OSD: title (maks. 19 znaków), value (maks. 15 znaków) wyświetlana dużą czcionką,
  * pasek postępu pos/max (max = 0: bez paska). */

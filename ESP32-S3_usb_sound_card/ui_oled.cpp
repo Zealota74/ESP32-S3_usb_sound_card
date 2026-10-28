@@ -37,6 +37,8 @@ static volatile uint32_t s_drawUs = 0;           /* czas ostatniego sendBuffer()
 static volatile UI_Screen_t s_screen = UI_SCREEN_DEFAULT;
 static uint8_t s_specLevel[ UI_SPEC_MAX_BARS ], s_specPeak[ UI_SPEC_MAX_BARS ];
 static int s_specBars = 16;
+static int s_specCh = 1;                         /* liczba kanałów w s_specLevel / s_specPeak */
+static UI_SpecMode_t s_specMode = UI_SPEC_MONO;
 static volatile int s_dirty = 1;
 
 /* jasność */
@@ -178,13 +180,26 @@ UI_Screen_t UI_GetScreen( void ) {
 	return s_screen;
 }
 // ---------------------------------------------------------------------------------------------
-void UI_SetSpectrum( const uint8_t * level, const uint8_t * peak, int bars ) {
+void UI_SetSpectrum( const uint8_t * level, const uint8_t * peak, int bars, int channels ) {
+	if ( channels < 1 ) channels = 1;
+	if ( channels > 2 ) channels = 2;
 	if ( bars < 1 ) bars = 1;
-	if ( bars > UI_SPEC_MAX_BARS ) bars = UI_SPEC_MAX_BARS;
-	memcpy( s_specLevel, level, (size_t)bars );
-	memcpy( s_specPeak, peak, (size_t)bars );
+	if ( bars * channels > UI_SPEC_MAX_BARS ) bars = UI_SPEC_MAX_BARS / channels;
+	memcpy( s_specLevel, level, (size_t)( bars * channels ) );
+	memcpy( s_specPeak, peak, (size_t)( bars * channels ) );
 	s_specBars = bars;
+	s_specCh = channels;
 	s_dirty = 1;
+}
+// ---------------------------------------------------------------------------------------------
+void UI_SetSpecMode( UI_SpecMode_t mode ) {
+	if ( (int)mode < 0 || (int)mode >= (int)UI_SPEC_MODE_COUNT ) mode = UI_SPEC_MONO;
+	s_specMode = mode;
+	s_dirty = 1;
+}
+// ---------------------------------------------------------------------------------------------
+UI_SpecMode_t UI_GetSpecMode( void ) {
+	return s_specMode;
 }
 // ---------------------------------------------------------------------------------------------
 void UI_ShowOsd( const char * title, const char * value, int pos, int max ) {
@@ -220,24 +235,42 @@ static void drawStat( void ) {
 	u8g2.drawStr( 140, 26, txt );
 }
 // ---------------------------------------------------------------------------------------------
-/* ---- warstwa dolna: SPECTRUM (słupki na całej szerokości 256 px, wysokość 64 px) ---- */
-static void drawSpectrum( void ) {
-	int n = s_specBars;
+/* ---- warstwa dolna: SPECTRUM (słupki na całej szerokości 256 px) ---- */
+/* Jedno widmo: n słupków w pasie wysokości hg pikseli od wiersza y0. Szczyt 0 = brak kreski (np. szczyty wyłączone). */
+static void drawTrace( const uint8_t * level, const uint8_t * peak, int n, int y0, int hg ) {
 	int gap = ( n <= 8 ) ? 4 : ( ( n <= 16 ) ? 3 : ( ( n <= 32 ) ? 2 : 1 ) ); /* 64 słupki: 3 px + 1 px przerwy */
 	int bw = ( 256 - ( n - 1 ) * gap ) / n;
 	int x0 = ( 256 - ( n * bw + ( n - 1 ) * gap ) ) / 2;
+	int bottom = y0 + hg - 1;                          /* ostatni wiersz pasa */
 
 	for ( int b = 0; b < n; b++ ) {
 		int x = x0 + b * ( bw + gap );
-		int h = (int)s_specLevel[ b ] * 64 / 255;
-		int py = 63 - (int)s_specPeak[ b ] * 63 / 255;
+		int h = (int)level[ b ] * hg / 255;
+		int py = bottom - (int)peak[ b ] * ( hg - 1 ) / 255;
 
-		u8g2.drawBox( x, 63, bw, 1 );                  /* linia bazowa: widać miejsce pustych słupków */
-		if ( h > 0 ) u8g2.drawBox( x, 64 - h, bw, h );
-		if ( s_specPeak[ b ] > 0 ) {
-			if ( py > 62 ) py = 62;
+		u8g2.drawBox( x, bottom, bw, 1 );              /* linia bazowa: widać miejsce pustych słupków */
+		if ( h > 0 ) u8g2.drawBox( x, y0 + hg - h, bw, h );
+		if ( peak[ b ] > 0 ) {
+			if ( py > bottom - 1 ) py = bottom - 1;
 			u8g2.drawBox( x, py, bw, 2 );              /* kreska szczytu */
 		}
+	}
+}
+// ---------------------------------------------------------------------------------------------
+static void drawSpectrum( void ) {
+	int n = s_specBars;
+	int rows = 1, first = 0;
+
+	if ( s_specCh >= 2 ) {                             /* przy jednym kanale z DSP zawsze rysujemy jedno widmo */
+		if ( s_specMode == UI_SPEC_R ) first = 1;
+		else if ( s_specMode == UI_SPEC_LR ) rows = 2;
+	}
+	for ( int r = 0; r < rows; r++ ) {
+		int ch = first + r;
+		int hg = ( rows == 2 ) ? UI_SPEC_ROW_H : 64;
+		int y0 = ( rows == 2 ) ? r * ( 64 - UI_SPEC_ROW_H ) : 0;   /* L u góry (0..29), R na dole (34..63): przerwa 4 px */
+
+		drawTrace( &s_specLevel[ ch * n ], &s_specPeak[ ch * n ], n, y0, hg );
 	}
 }
 // ---------------------------------------------------------------------------------------------

@@ -54,13 +54,21 @@ static void syncSpectrum( uint32_t now ) {
 	/* widmo liczone tylko na ekranie SPECTRUM (analiza w DSP_Poll, w tym samym wątku) */
 	if ( viz && !s_wasViz ) BARS_Reset();            /* po włączeniu ekranu słupki startują od zera */
 	s_wasViz = viz;
+	if ( viz ) {                                      /* liczba kanałów DSP musi pasować do trybu rysowania (np. po starcie) */
+		int want = ( UI_GetSpecMode() == UI_SPEC_MONO ) ? 1 : 2;
+
+		if ( DSP_SpectrumGetChannels() != want ) {
+			DSP_SpectrumSetChannels( want );
+			BARS_Reset();
+		}
+	}
 	DSP_SpectrumEnable( viz );
 	if ( viz && DSP_GetBandPower( &sp ) ) {
 		uint8_t level[ BARS_MAX ], peak[ BARS_MAX ];
 
 		BARS_Update( sp.power, sp.channels * sp.bands, now );
 		BARS_Get( level, peak );
-		UI_SetSpectrum( level, peak, sp.bands );     /* rysowany jest pierwszy kanał (ekran jest na razie jednokanałowy) */
+		UI_SetSpectrum( level, peak, sp.bands, sp.channels );   /* układ [kanał * bands + pasmo], o wyglądzie decyduje UI_SetSpecMode */
 	}
 
 	if ( now - tOled >= OLED_PERIOD_MS ) {

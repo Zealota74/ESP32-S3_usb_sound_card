@@ -9,7 +9,11 @@
 static const uint16_t kFallMs[] = BARS_FALL_MS_LIST;
 #define FALL_STEPS  ( (int)( sizeof( kFallMs ) / sizeof( kFallMs[ 0 ] ) ) )
 
+static const uint16_t kPeakMs[] = BARS_PEAK_FALL_MS_LIST;
+#define PEAK_STEPS  ( (int)( sizeof( kPeakMs ) / sizeof( kPeakMs[ 0 ] ) ) )
+
 static int      s_fallIdx = BARS_FALL_DEFAULT;
+static int      s_peakIdx = BARS_PEAK_FALL_DEFAULT;
 static float    s_level[ BARS_MAX ];    /* wysokość słupka 0..255 */
 static float    s_peak[ BARS_MAX ];     /* kreska szczytu 0..255 */
 static float    s_hold[ BARS_MAX ];     /* pozostały czas podtrzymania szczytu (ms) */
@@ -27,7 +31,8 @@ void BARS_Reset( void ) {
 }
 // ---------------------------------------------------------------------------------------------
 void BARS_Update( const float * power, int count, uint32_t now_ms ) {
-	const float peakRate = 255.0f / (float)BARS_PEAK_FALL_MS;   /* opadanie szczytu (skala/ms) */
+	const int peakMs = (int)kPeakMs[ s_peakIdx ];               /* 0 = szczyty wyłączone */
+	const float peakRate = ( peakMs > 0 ) ? 255.0f / (float)peakMs : 0.0f;   /* opadanie szczytu (skala/ms) */
 	float dt = 0.0f, fall;
 
 	if ( count < 1 ) return;
@@ -62,7 +67,12 @@ void BARS_Update( const float * power, int count, uint32_t now_ms ) {
 		}
 		s_level[ b ] = lvl;
 
-		/* kreska szczytu: podtrzymanie, potem wolne opadanie */
+		/* kreska szczytu: podtrzymanie, potem wolne opadanie; przy peakMs == 0 szczytów nie ma */
+		if ( peakMs <= 0 ) {
+			s_peak[ b ] = 0.0f;
+			s_hold[ b ] = 0.0f;
+			continue;
+		}
 		if ( lvl >= s_peak[ b ] ) {
 			s_peak[ b ] = lvl;
 			s_hold[ b ] = (float)BARS_PEAK_HOLD_MS;
@@ -106,4 +116,24 @@ int BARS_FallSteps( void ) {
 // ---------------------------------------------------------------------------------------------
 int BARS_GetFallMs( void ) {
 	return (int)kFallMs[ s_fallIdx ];
+}
+// ---------------------------------------------------------------------------------------------
+void BARS_PeakStep( int dir ) {
+	int idx = s_peakIdx + ( dir >= 0 ? 1 : -1 );
+
+	if ( idx < 0 ) idx = 0;
+	if ( idx > PEAK_STEPS - 1 ) idx = PEAK_STEPS - 1;
+	s_peakIdx = idx;
+}
+// ---------------------------------------------------------------------------------------------
+int BARS_PeakIndex( void ) {
+	return s_peakIdx;
+}
+// ---------------------------------------------------------------------------------------------
+int BARS_PeakSteps( void ) {
+	return PEAK_STEPS;
+}
+// ---------------------------------------------------------------------------------------------
+int BARS_GetPeakMs( void ) {
+	return (int)kPeakMs[ s_peakIdx ];
 }

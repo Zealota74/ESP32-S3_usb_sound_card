@@ -37,12 +37,17 @@ extern "C" {
 #define BARS_FALL_DEFAULT  3       /* indeks na liście: 500 ms */
 #endif
 
-/* Kreska szczytu: podtrzymanie (ms), potem opadanie z pełnej skali do zera w BARS_PEAK_FALL_MS. */
+/* Kreska szczytu: podtrzymanie (ms), potem opadanie z pełnej skali do zera w czasie z listy BARS_PEAK_FALL_MS_LIST.
+ * Lista rośnie (większa wartość = wolniejsze opadanie); wartość 0 = brak kresek szczytu (nie są liczone ani rysowane).
+ * Regulowane w czasie pracy (BARS_PeakStep, menu PEAK FALL). */
 #ifndef BARS_PEAK_HOLD_MS
 #define BARS_PEAK_HOLD_MS  460
 #endif
-#ifndef BARS_PEAK_FALL_MS
-#define BARS_PEAK_FALL_MS  1500
+#ifndef BARS_PEAK_FALL_MS_LIST
+#define BARS_PEAK_FALL_MS_LIST  { 0, 300, 500, 700, 1000, 1500, 2000, 3000 }
+#endif
+#ifndef BARS_PEAK_FALL_DEFAULT
+#define BARS_PEAK_FALL_DEFAULT  5  /* indeks na liście: 1500 ms (tak było przed wprowadzeniem regulacji) */
 #endif
 
 /* Najdłuższy odstęp między ramkami brany do opadania (ms). Dłuższa przerwa (np. powrót z ekranu STAT) opuszcza słupki
@@ -67,6 +72,14 @@ void BARS_FallStep(int dir);
 int  BARS_FallIndex(void);
 int  BARS_FallSteps(void);
 int  BARS_GetFallMs(void);
+
+/* Opadanie kresek szczytu: indeks 0 = BRAK szczytów (0 ms) ... BARS_PeakSteps()-1 = najwolniej (czasy z BARS_PEAK_FALL_MS_LIST).
+ * BARS_PeakStep(dir): +1 większa wartość (wolniej), -1 mniejsza (szybciej, a na końcu brak szczytów), z ograniczeniem do zakresu.
+ * Przy braku szczytów BARS_Get() oddaje szczyt 0 dla każdego słupka. */
+void BARS_PeakStep(int dir);
+int  BARS_PeakIndex(void);
+int  BARS_PeakSteps(void);
+int  BARS_GetPeakMs(void);                 /* 0 = brak szczytów */
 
 #ifdef __cplusplus
 }
