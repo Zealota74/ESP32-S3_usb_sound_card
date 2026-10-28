@@ -5,7 +5,8 @@
 #include <Arduino.h>
 #include <stdio.h>
 
-#include "src/audio/audio.h"
+#include "src/audio_manage.h"
+#include "src/dsp_manage.h"
 #include "ui_oled.h"
 #include "menu_oled.h"
 
@@ -21,7 +22,7 @@ static void menuShow( void ) {
 	switch ( s_menuItem ) {
 		case MENU_BARS_CNT:
 			snprintf( t, sizeof( t ), "%d/%d SPECTRUM BARS", MENU_BARS_CNT + 1, MENU_COUNT );
-			snprintf( v, sizeof( v ), "%d", AUDIO_SpectrumGetBars() );
+			snprintf( v, sizeof( v ), "%d", DSP_SpectrumGetBars() );
 			break;
 		case MENU_BRIGHT:
 			snprintf( t, sizeof( t ), "%d/%d BRIGHTNESS", MENU_BRIGHT + 1, MENU_COUNT );
@@ -31,14 +32,14 @@ static void menuShow( void ) {
 			break;
 		case MENU_ENGINE:
 			snprintf( t, sizeof( t ), "%d/%d ANALYSIS", MENU_ENGINE + 1, MENU_COUNT );
-			snprintf( v, sizeof( v ), "%s", AUDIO_SpectrumEngineName( AUDIO_SpectrumGetEngine() ) );
+			snprintf( v, sizeof( v ), "%s", DSP_SpectrumEngineName( DSP_SpectrumGetEngine() ) );
 			break;
 		case MENU_BARS_FALL:
 		default:
 			snprintf( t, sizeof( t ), "%d/%d SPECTRUM FALL", MENU_BARS_FALL + 1, MENU_COUNT );
-			snprintf( v, sizeof( v ), "%lu ms", (unsigned long)AUDIO_SpectrumGetFallMs() );
-			pos = AUDIO_SpectrumFallIndex();
-			max = AUDIO_SpectrumFallSteps() - 1;     /* pasek: dalej w prawo = szybsze opadanie */
+			snprintf( v, sizeof( v ), "%lu ms", (unsigned long)DSP_SpectrumGetFallMs() );
+			pos = DSP_SpectrumFallIndex();
+			max = DSP_SpectrumFallSteps() - 1;     /* pasek: dalej w prawo = szybsze opadanie */
 			break;
 	}
 	UI_ShowMenu( t, v, pos, max );
@@ -54,18 +55,18 @@ static void menuChange( int steps ) {
 
 	switch ( s_menuItem ) {
 		case MENU_BARS_CNT:
-			AUDIO_SpectrumCycleBars( dir );
+			DSP_SpectrumCycleBars( dir );
 			break;
 		case MENU_BRIGHT:
 			UI_BrightnessStep( steps );      /* bez zawijania: skok z max na min byłby nieprzyjemny */
 			break;
 		case MENU_ENGINE: {
-			int n = AUDIO_SpectrumEngineCount();
-			AUDIO_SpectrumSetEngine( ( AUDIO_SpectrumGetEngine() + dir + n ) % n );
+			int n = DSP_SpectrumEngineCount();
+			DSP_SpectrumSetEngine( ( DSP_SpectrumGetEngine() + dir + n ) % n );
 			break;
 		}
 		case MENU_BARS_FALL:
-			AUDIO_SpectrumFallStep( dir );   /* z ograniczeniem do zakresu, bez zawijania */
+			DSP_SpectrumFallStep( dir );   /* z ograniczeniem do zakresu, bez zawijania */
 			break;
 		default:
 			break;

@@ -1,52 +1,52 @@
 /*
- * audio_spectrum.cpp - analizator widma: część wspólna dla wszystkich silników.
+ * spectrum.cpp - analizator widma: część wspólna dla wszystkich silników.
  *
- * Tu leży: bufor kołowy (SPEC_Feed), podział na pasma logarytmiczne, wybór silnika,
+ * Tu leży: bufor kołowy (SPECTRUM_Feed), podział na pasma logarytmiczne, wybór silnika,
  * oraz obróbka słupków (moc -> dB -> 0..255, opadanie, kreska szczytu).
  * Silniki liczą wyłącznie moc pasm: spectrum_fft.cpp (FFT), spectrum_iir.cpp (bank IIR).
  */
 #include <math.h>
 #include <string.h>
 
-#include "audio_spectrum.h"
-#include "audio_config.h"
+#include "spectrum.h"
+#include "dsp_config.h"
 #include "spectrum_engine.h"
 
-int16_t                  g_specRing[ SPEC_RING_SIZE ];
+int16_t                  g_spectrumRing[ SPECTRUM_RING_SIZE ];
 static volatile uint32_t s_wr = 0;          /* licznik zapisanych próbek (zapis: wątek audio) */
 static uint32_t          s_lastWr = 0;      /* wartość s_wr przy ostatniej analizie */
 static uint32_t          s_lastBlock = 0;   /* ile próbek objęło ostatnie wywołanie silnika */
 
-static const SpecEngine_t * const kEngine[ SPEC_ENGINE_COUNT ] = { &g_specEngineFft, &g_specEngineIir, &g_specEngineIirMr };
-static int s_engine = AUDIO_SPECTRUM_ENGINE_DEFAULT;
+static const SpectrumEngine_t * const kEngine[ SPECTRUM_ENGINE_COUNT ] = { &g_spectrumEngineFft, &g_spectrumEngineIir, &g_spectrumEngineIirMr };
+static int s_engine = SPECTRUM_ENGINE_DEFAULT;
 
 static uint32_t   s_fs = 44100;
-static SpecBand_t s_band[ SPEC_MAX_BARS ];
-static float      s_bandPow[ SPEC_MAX_BARS ];   /* moc pasm z silnika (sinus pełnej skali = 1.0) */
+static SpectrumBand_t s_band[ SPECTRUM_MAX_BARS ];
+static float      s_bandPow[ SPECTRUM_MAX_BARS ];   /* moc pasm z silnika (sinus pełnej skali = 1.0) */
 static int        s_bars = 16;
 
-static const uint16_t kFallMs[] = AUDIO_SPECTRUM_FALL_MS_LIST;
+static const uint16_t kFallMs[] = SPECTRUM_FALL_MS_LIST;
 #define FALL_STEPS ( (int)( sizeof( kFallMs ) / sizeof( kFallMs[ 0 ] ) ) )
-#define HOP        ( AUDIO_SPECTRUM_HOP )
-static int    s_fallIdx = AUDIO_SPECTRUM_FALL_DEFAULT;
+#define HOP        ( SPECTRUM_HOP )
+static int    s_fallIdx = SPECTRUM_FALL_DEFAULT;
 static int    s_fallPerFrame = 12;     /* opadanie słupka na ramkę (skala 0..255) */
-static int    s_level[ SPEC_MAX_BARS ];
-static int    s_peak[ SPEC_MAX_BARS ];
-static int    s_hold[ SPEC_MAX_BARS ];
+static int    s_level[ SPECTRUM_MAX_BARS ];
+static int    s_peak[ SPECTRUM_MAX_BARS ];
+static int    s_hold[ SPECTRUM_MAX_BARS ];
 
-#ifdef AUDIO_SPECTRUM_TEST
-const float * SPEC_DebugBandPower( void ) { return s_bandPow; }
+#ifdef SPECTRUM_TEST
+const float * SPECTRUM_DebugBandPower( void ) { return s_bandPow; }
 #endif
 
 // ---------------------------------------------------------------------------------------------
-uint32_t SpecRing_Wr( void ) {
+uint32_t SpectrumRing_Wr( void ) {
 	return __atomic_load_n( &s_wr, __ATOMIC_ACQUIRE );
 }
 // ---------------------------------------------------------------------------------------------
 /* Pasma logarytmiczne F_LOW..F_HIGH (górna krawędź ograniczona do 0,49 fs). */
 static void buildBands( void ) {
-	float fLow = (float)AUDIO_SPECTRUM_F_LOW;
-	float fHigh = (float)AUDIO_SPECTRUM_F_HIGH;
+	float fLow = (float)SPECTRUM_F_LOW;
+	float fHigh = (float)SPECTRUM_F_HIGH;
 	float fMax = 0.49f * (float)s_fs;
 	float ratio;
 
@@ -77,91 +77,91 @@ static void computeFall( void ) {
 	s_fallPerFrame = ( f < 1 ) ? 1 : f;
 }
 // ---------------------------------------------------------------------------------------------
-int SPEC_FallSteps( void ) {
+int SPECTRUM_FallSteps( void ) {
 	return FALL_STEPS;
 }
 // ---------------------------------------------------------------------------------------------
-void SPEC_SetFall( int idx ) {
+void SPECTRUM_SetFall( int idx ) {
 	if ( idx < 0 ) idx = 0;
 	if ( idx > FALL_STEPS - 1 ) idx = FALL_STEPS - 1;
 	s_fallIdx = idx;
 	computeFall();
 }
 // ---------------------------------------------------------------------------------------------
-int SPEC_GetFall( void ) {
+int SPECTRUM_GetFall( void ) {
 	return s_fallIdx;
 }
 // ---------------------------------------------------------------------------------------------
-uint32_t SPEC_GetFallMs( void ) {
+uint32_t SPECTRUM_GetFallMs( void ) {
 	return kFallMs[ s_fallIdx ];
 }
 // ---------------------------------------------------------------------------------------------
-void SPEC_Init( uint32_t sample_rate ) {
-	if ( s_engine < 0 || s_engine >= SPEC_ENGINE_COUNT ) s_engine = SPEC_ENGINE_FFT;
-	for ( int e = 0; e < SPEC_ENGINE_COUNT; e++ ) kEngine[ e ]->init();
-	memset( g_specRing, 0, sizeof( g_specRing ) );
+void SPECTRUM_Init( uint32_t sample_rate ) {
+	if ( s_engine < 0 || s_engine >= SPECTRUM_ENGINE_COUNT ) s_engine = SPECTRUM_ENGINE_FFT;
+	for ( int e = 0; e < SPECTRUM_ENGINE_COUNT; e++ ) kEngine[ e ]->init();
+	memset( g_spectrumRing, 0, sizeof( g_spectrumRing ) );
 	s_wr = 0;
 	s_lastWr = 0;
 	s_fs = sample_rate ? sample_rate : 44100;
-	SPEC_SetFall( s_fallIdx );   /* przelicz krok opadania dla bieżącej częstotliwości */
+	SPECTRUM_SetFall( s_fallIdx );   /* przelicz krok opadania dla bieżącej częstotliwości */
 	applyConfig();
-	SPEC_Reset();
+	SPECTRUM_Reset();
 }
 // ---------------------------------------------------------------------------------------------
-void SPEC_SetRate( uint32_t sample_rate ) {
+void SPECTRUM_SetRate( uint32_t sample_rate ) {
 	if ( sample_rate == 0 || sample_rate == s_fs ) return;
 	s_fs = sample_rate;
 	computeFall();
 	applyConfig();
-	SPEC_Reset();
+	SPECTRUM_Reset();
 }
 // ---------------------------------------------------------------------------------------------
-void SPEC_Feed( const int16_t * stereo, uint32_t frames ) {
+void SPECTRUM_Feed( const int16_t * stereo, uint32_t frames ) {
 	uint32_t wr = s_wr;
 
 	for ( uint32_t i = 0; i < frames; i++ ) {
-		g_specRing[ ( wr + i ) & SPEC_RING_MASK ] = (int16_t)( ( (int32_t)stereo[ i * 2 ] + (int32_t)stereo[ i * 2 + 1 ] ) >> 1 );
+		g_spectrumRing[ ( wr + i ) & SPECTRUM_RING_MASK ] = (int16_t)( ( (int32_t)stereo[ i * 2 ] + (int32_t)stereo[ i * 2 + 1 ] ) >> 1 );
 	}
 	__atomic_store_n( &s_wr, wr + frames, __ATOMIC_RELEASE ); /* dane muszą być widoczne przed przesunięciem wr */
 }
 // ---------------------------------------------------------------------------------------------
-void SPEC_SetBars( int bars ) {
+void SPECTRUM_SetBars( int bars ) {
 	if ( bars < 1 ) bars = 1;
-	if ( bars > SPEC_MAX_BARS ) bars = SPEC_MAX_BARS;
+	if ( bars > SPECTRUM_MAX_BARS ) bars = SPECTRUM_MAX_BARS;
 	if ( bars == s_bars ) return;
 	s_bars = bars;
 	applyConfig();
-	SPEC_Reset();
+	SPECTRUM_Reset();
 }
 // ---------------------------------------------------------------------------------------------
-int SPEC_GetBars( void ) {
+int SPECTRUM_GetBars( void ) {
 	return s_bars;
 }
 // ---------------------------------------------------------------------------------------------
-void SPEC_SetEngine( int engine ) {
+void SPECTRUM_SetEngine( int engine ) {
 	if ( engine < 0 ) engine = 0;
-	if ( engine > SPEC_ENGINE_COUNT - 1 ) engine = SPEC_ENGINE_COUNT - 1;
+	if ( engine > SPECTRUM_ENGINE_COUNT - 1 ) engine = SPECTRUM_ENGINE_COUNT - 1;
 	if ( engine == s_engine ) return;
 	s_engine = engine;
 	applyConfig();
-	SPEC_Reset();
+	SPECTRUM_Reset();
 }
 // ---------------------------------------------------------------------------------------------
-int SPEC_GetEngine( void ) {
+int SPECTRUM_GetEngine( void ) {
 	return s_engine;
 }
 // ---------------------------------------------------------------------------------------------
-const char * SPEC_EngineName( int engine ) {
-	if ( engine < 0 || engine >= SPEC_ENGINE_COUNT ) return "?";
+const char * SPECTRUM_EngineName( int engine ) {
+	if ( engine < 0 || engine >= SPECTRUM_ENGINE_COUNT ) return "?";
 	return kEngine[ engine ]->name;
 }
 // ---------------------------------------------------------------------------------------------
-void SPEC_Reset( void ) {
+void SPECTRUM_Reset( void ) {
 	memset( s_level, 0, sizeof( s_level ) );
 	memset( s_peak, 0, sizeof( s_peak ) );
 	memset( s_hold, 0, sizeof( s_hold ) );
 	kEngine[ s_engine ]->reset();
-	s_lastWr = SpecRing_Wr();   /* analiza zaczyna od próbek, które przyjdą po resecie */
+	s_lastWr = SpectrumRing_Wr();   /* analiza zaczyna od próbek, które przyjdą po resecie */
 }
 // ---------------------------------------------------------------------------------------------
 /* Moc pasm -> słupki: dB, skala 0..255, szybkie narastanie, wolne opadanie, kreska szczytu. */
@@ -170,7 +170,7 @@ static void updateBars( void ) {
 		float db = 10.0f * log10f( s_bandPow[ b ] + 1e-12f );
 		int target, lvl = s_level[ b ];
 
-		target = (int)( ( db - (float)AUDIO_SPECTRUM_DB_FLOOR ) * ( 255.0f / (float)( AUDIO_SPECTRUM_DB_TOP - AUDIO_SPECTRUM_DB_FLOOR ) ) + 0.5f );
+		target = (int)( ( db - (float)SPECTRUM_DB_FLOOR ) * ( 255.0f / (float)( SPECTRUM_DB_TOP - SPECTRUM_DB_FLOOR ) ) + 0.5f );
 		if ( target < 0 ) target = 0;
 		if ( target > 255 ) target = 255;
 
@@ -185,18 +185,18 @@ static void updateBars( void ) {
 		/* kreska szczytu: podtrzymanie, potem wolne opadanie */
 		if ( lvl >= s_peak[ b ] ) {
 			s_peak[ b ] = lvl;
-			s_hold[ b ] = AUDIO_SPECTRUM_PEAK_HOLD;
+			s_hold[ b ] = SPECTRUM_PEAK_HOLD;
 		} else if ( s_hold[ b ] > 0 ) {
 			s_hold[ b ]--;
 		} else {
-			s_peak[ b ] -= AUDIO_SPECTRUM_PEAK_FALL;
+			s_peak[ b ] -= SPECTRUM_PEAK_FALL;
 			if ( s_peak[ b ] < lvl ) s_peak[ b ] = lvl;
 		}
 	}
 }
 // ---------------------------------------------------------------------------------------------
-int SPEC_Process( void ) {
-	uint32_t wr = SpecRing_Wr();
+int SPECTRUM_Process( void ) {
+	uint32_t wr = SpectrumRing_Wr();
 	uint32_t from = s_lastWr;
 	int ok;
 
@@ -210,18 +210,18 @@ int SPEC_Process( void ) {
 	return 1;
 }
 // ---------------------------------------------------------------------------------------------
-/* Benchmark: ten sam kod co SPEC_Process, ale na ostatnich HOP próbkach i bez wpływu na słupki. */
-int SPEC_Bench( void ) {
-	uint32_t wr = SpecRing_Wr();
+/* Benchmark: ten sam kod co SPECTRUM_Process, ale na ostatnich HOP próbkach i bez wpływu na słupki. */
+int SPECTRUM_Bench( void ) {
+	uint32_t wr = SpectrumRing_Wr();
 
 	return kEngine[ s_engine ]->process( wr - (uint32_t)HOP, wr, s_bandPow );
 }
 // ---------------------------------------------------------------------------------------------
-uint32_t SPEC_GetLastBlock( void ) {
+uint32_t SPECTRUM_GetLastBlock( void ) {
 	return s_lastBlock;
 }
 // ---------------------------------------------------------------------------------------------
-void SPEC_GetFrame( uint8_t * level, uint8_t * peak ) {
+void SPECTRUM_GetFrame( uint8_t * level, uint8_t * peak ) {
 	for ( int b = 0; b < s_bars; b++ ) {
 		level[ b ] = (uint8_t)s_level[ b ];
 		peak[ b ] = (uint8_t)s_peak[ b ];

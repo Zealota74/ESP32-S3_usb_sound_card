@@ -1,5 +1,5 @@
 /*
- * audio_types.h - typy wspólne dla audio.h, audio_source.h i źródeł audio.
+ * audio_types.h - typy wspólne dla audio_manage.h, audio_source.h i źródeł audio.
  */
 #ifndef AUDIO_TYPES_H
 #define AUDIO_TYPES_H

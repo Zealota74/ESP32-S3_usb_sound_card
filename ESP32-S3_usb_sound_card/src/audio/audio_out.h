@@ -5,8 +5,8 @@
  * jak pompuje dane (zadanie RTOS z blokującym zapisem, przerwanie DMA...),
  * a o kolejne ramki prosi callbackiem fill().
  *
- * Implementacje: audio_out_i2s_esp32.cpp (ESP32-S3, I2S + PCM5102).
- * Port na inny MCU = nowy plik z tymi samymi funkcjami.
+ * Implementacje leżą w HARDWARE/: audio_out_i2s_esp32.cpp (ESP32-S3, I2S + PCM5102).
+ * Port na inny MCU = nowy plik w HARDWARE/ z tymi samymi funkcjami.
  */
 #ifndef AUDIO_OUT_H
 #define AUDIO_OUT_H
@@ -42,9 +42,6 @@ int      AUDIO_OUT_SetSampleRate(uint32_t sample_rate);
 
 /* Liczba błędów zapisu do peryferium od startu. */
 uint32_t AUDIO_OUT_GetErrors(void);
-
-/* Monotoniczny czas w mikrosekundach (tylko do pomiarów diagnostycznych, np. czasu FFT). */
-uint32_t AUDIO_OUT_TimeUs(void);
 
 #ifdef __cplusplus
 }

@@ -1,7 +1,7 @@
 /*
  * spectrum_fft.cpp - silnik FFT: rzeczywista FFT N punktów liczona jako zespolona N/2 + post-processing.
  * Pasmo = suma mocy binów (pasmo węższe niż bin: interpolacja liniowa mocy między sąsiednimi binami).
- * Opcjonalnie (SPEC_SetFftQ / AUDIO_SPECTRUM_FFT_Q): pasmo = średnia ważona mocy binów z jądrem trójkątnym
+ * Opcjonalnie (SPECTRUM_SetFftQ / SPECTRUM_FFT_Q): pasmo = średnia ważona mocy binów z jądrem trójkątnym
  * o szerokości połówkowej f0/Q. Wszystkie pasma dostają wtedy tę samą dobroć (nie węższą niż rozdzielczość
  * FFT), więc słupki nachodzą na siebie jak w analizatorze o niskim Q (podobny wygląd jak bank IIR).
  * Pamięć (N = 4096): tablice sin/cos 16 kB, bufor FFT 16 kB, moce binów 8 kB (ring jest wspólny).
@@ -11,7 +11,7 @@
 
 #include "spectrum_engine.h"
 
-#define N         (AUDIO_SPECTRUM_FFT_N)
+#define N         (SPECTRUM_FFT_N)
 #define M         (N / 2)
 
 #define TWO_PI_D  6.283185307179586
@@ -20,8 +20,8 @@ static float s_cos[ M + 1 ], s_sin[ M + 1 ];   /* cos/sin(2*pi*k/N), k = 0..M */
 static float s_re[ M ], s_im[ M ];
 static float s_pow[ M ];                    /* moc znormalizowana (pełna skala sinus = 1.0 w binie) */
 
-#ifndef AUDIO_SPECTRUM_FFT_Q
-#define AUDIO_SPECTRUM_FFT_Q   0.0f       /* 0 = pasma "cegiełkowe" (jak dotąd), > 0 = dobroć jądra, < 0 = automatycznie */
+#ifndef SPECTRUM_FFT_Q
+#define SPECTRUM_FFT_Q   0.0f       /* 0 = pasma "cegiełkowe" (jak dotąd), > 0 = dobroć jądra, < 0 = automatycznie */
 #endif
 #define FFT_MIN_BINS  2.0f                /* najwęższe jądro: szerokość połówkowa w binach (limit rozdzielczości) */
 
@@ -32,16 +32,16 @@ typedef struct {
 	float norm;        /* tryb jądra: Nb / suma wag, Nb = szerokość pasma nominalnego w binach */
 } FftBand_t;
 
-static FftBand_t s_fb[ SPEC_MAX_BARS ];
+static FftBand_t s_fb[ SPECTRUM_MAX_BARS ];
 static int       s_bars = 0;
 static uint32_t  s_fs = 44100;
-static const SpecBand_t * s_bandSrc = NULL;   /* pasma wspólne (statyczne w audio_spectrum.cpp) */
-static float     s_q = AUDIO_SPECTRUM_FFT_Q;
+static const SpectrumBand_t * s_bandSrc = NULL;   /* pasma wspólne (statyczne w spectrum.cpp) */
+static float     s_q = SPECTRUM_FFT_Q;
 
-#ifdef AUDIO_SPECTRUM_TEST
+#ifdef SPECTRUM_TEST
 static uint32_t s_dbgStart = 0;
-const float * SPEC_DebugPower( void ) { return s_pow; }
-uint32_t SPEC_DebugLastStart( void ) { return s_dbgStart; }
+const float * SPECTRUM_DebugPower( void ) { return s_pow; }
+uint32_t SPECTRUM_DebugLastStart( void ) { return s_dbgStart; }
 #endif
 
 // ---------------------------------------------------------------------------------------------
@@ -53,7 +53,7 @@ static void fftInit( void ) {
 }
 // ---------------------------------------------------------------------------------------------
 static void fftBuildBands( void ) {
-	const SpecBand_t * band = s_bandSrc;
+	const SpectrumBand_t * band = s_bandSrc;
 	float df = (float)s_fs / (float)N;
 	float q = s_q;
 
@@ -98,19 +98,19 @@ static void fftBuildBands( void ) {
 	}
 }
 // ---------------------------------------------------------------------------------------------
-static void fftConfigure( uint32_t fs, const SpecBand_t * band, int bars ) {
+static void fftConfigure( uint32_t fs, const SpectrumBand_t * band, int bars ) {
 	s_fs = fs;
 	s_bandSrc = band;
 	s_bars = bars;
 	fftBuildBands();
 }
 // ---------------------------------------------------------------------------------------------
-void SPEC_SetFftQ( float q ) {
+void SPECTRUM_SetFftQ( float q ) {
 	s_q = q;
 	fftBuildBands();
 }
 // ---------------------------------------------------------------------------------------------
-float SPEC_GetFftQ( void ) {
+float SPECTRUM_GetFftQ( void ) {
 	return s_q;
 }
 // ---------------------------------------------------------------------------------------------
@@ -169,13 +169,13 @@ static int fftProcess( uint32_t from, uint32_t to, float * power ) {
 	/* okno + upakowanie: z[m] = x[2m] + j*x[2m+1] */
 	for ( int m = 0; m < M; m++ ) {
 		int n0 = 2 * m, n1 = n0 + 1;
-		s_re[ m ] = (float)g_specRing[ ( start + (uint32_t)n0 ) & SPEC_RING_MASK ] * win( n0 );
-		s_im[ m ] = (float)g_specRing[ ( start + (uint32_t)n1 ) & SPEC_RING_MASK ] * win( n1 );
+		s_re[ m ] = (float)g_spectrumRing[ ( start + (uint32_t)n0 ) & SPECTRUM_RING_MASK ] * win( n0 );
+		s_im[ m ] = (float)g_spectrumRing[ ( start + (uint32_t)n1 ) & SPECTRUM_RING_MASK ] * win( n1 );
 	}
-	if ( (uint32_t)( SpecRing_Wr() - start ) > (uint32_t)SPEC_RING_SIZE ) {   /* producent nadpisał dane w trakcie kopiowania */
+	if ( (uint32_t)( SpectrumRing_Wr() - start ) > (uint32_t)SPECTRUM_RING_SIZE ) {   /* producent nadpisał dane w trakcie kopiowania */
 		return 0;
 	}
-#ifdef AUDIO_SPECTRUM_TEST
+#ifdef SPECTRUM_TEST
 	s_dbgStart = start;
 #endif
 
@@ -219,4 +219,4 @@ static int fftProcess( uint32_t from, uint32_t to, float * power ) {
 	return 1;
 }
 // ---------------------------------------------------------------------------------------------
-const SpecEngine_t g_specEngineFft = { "FFT", fftInit, fftConfigure, fftReset, fftProcess };
+const SpectrumEngine_t g_spectrumEngineFft = { "FFT", fftInit, fftConfigure, fftReset, fftProcess };

@@ -1,9 +1,10 @@
 /*
- * audio.h - podsystem audio: źródło -> FIFO -> drift -> głośność -> wyjście
+ * audio_manage.h - zarządca toru audio: źródło -> FIFO -> drift -> głośność -> wyjście
  *
- * Jedyny moduł audio, który dołącza program główny. Ukrywa FIFO, drift,
- * źródło (USB/Wi-Fi) i wyjście (I2S). Źródło wybiera się w audio_config.h,
- * wyjście wyznacza plik audio_out_*.cpp w projekcie.
+ * Ukrywa FIFO, drift, źródło (USB/Wi-Fi) i wyjście (I2S). Źródło wybiera się
+ * w AUDIO/audio_config.h, wyjście wyznacza plik audio_out_*.cpp w HARDWARE/.
+ * Nie zna DSP: analizy sygnału (widmo) podłączają się przez AUDIO_SetTap(),
+ * patrz dsp_manage.h.
  *
  * Użycie:
  *   setup(): AUDIO_Init(&cfg)
@@ -11,12 +12,12 @@
  *            AUDIO_GetVolume()/AUDIO_GetStats() dla UI i diagnostyki
  *            AUDIO_VolumeStep()/AUDIO_MuteToggle() z obsługi wejść
  */
-#ifndef AUDIO_H
-#define AUDIO_H
+#ifndef AUDIO_MANAGE_H
+#define AUDIO_MANAGE_H
 
 #include <stdint.h>
-#include "audio_config.h"
-#include "audio_types.h"
+#include "AUDIO/audio_config.h"
+#include "AUDIO/audio_types.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -44,8 +45,6 @@ typedef struct {
   uint32_t fifo_min;           /* minimum/maksimum poziomu od ostatniego skasowania */
   uint32_t fifo_max;
   uint32_t consumed_frames;    /* ramki zdjęte z FIFO od startu */
-  uint32_t fft_us;             /* czas silnika widma (FFT lub IIR) na jeden hop próbek AUDIO_SPECTRUM_HOP, us; średnia z ok. 0,5 s
-                                  (0 = jeszcze nie policzona). Budżet = hop / fs; obciążenie % = fft_us * fs / ( HOP * 1e4 ) */
   int32_t  drift_ppm;          /* bieżąca korekta tempa (0 poza odtwarzaniem) */
   uint32_t sample_rate;        /* bieżąca częstotliwość próbkowania wyjścia (Hz) */
   AUDIO_SrcStats_t src;        /* statystyki źródła */
@@ -80,36 +79,22 @@ void AUDIO_MediaKey(AUDIO_MediaKey_t key);
 int  AUDIO_GuardActive(void);
 void AUDIO_GuardRelease(void);
 
-/* Analizator widma. Liczony w AUDIO_Poll() (czyli w loop()), tylko gdy włączony.
- * Próbki pochodzą z toru audio przed regulacją głośności, więc widmo nie zależy od poziomu. */
-#define AUDIO_SPECTRUM_MAX_BARS  64
-
-typedef struct {
-  uint8_t  bars;                              /* liczba słupków: 7, 16 lub 32 */
-  uint8_t  level[AUDIO_SPECTRUM_MAX_BARS];    /* wysokość słupka 0..255 */
-  uint8_t  peak[AUDIO_SPECTRUM_MAX_BARS];     /* kreska szczytu 0..255 */
-} AUDIO_Spectrum_t;
-
-void AUDIO_SpectrumEnable(int on);            /* włącz tylko, gdy widmo jest wyświetlane */
-void AUDIO_SpectrumSetBars(int bars);         /* 7, 16 lub 32 */
-int  AUDIO_SpectrumGetBars(void);
-void AUDIO_SpectrumCycleBars(int dir);        /* +1 / -1: 7 -> 16 -> 32 -> 7 (cyklicznie) */
-int  AUDIO_GetSpectrum(AUDIO_Spectrum_t *out);/* 1 = nowa ramka od ostatniego wywołania */
-void AUDIO_SpectrumFallStep(int dir);         /* +1 szybsze opadanie słupków, -1 wolniejsze (bez zawijania) */
-int  AUDIO_SpectrumGetFallMs(void);           /* czas opadania słupka z pełnej skali do zera (ms) */
-int  AUDIO_SpectrumFallIndex(void);           /* 0 = najwolniej ... AUDIO_SpectrumFallSteps()-1 = najszybciej */
-int  AUDIO_SpectrumFallSteps(void);
-
 /* Statystyki; reset_minmax = 1 zeruje fifo_min/fifo_max po odczycie. */
 void AUDIO_GetStats(AUDIO_Stats_t *out, int reset_minmax);
 
-int         AUDIO_SpectrumGetEngine( void );
-void        AUDIO_SpectrumSetEngine( int e );
-int         AUDIO_SpectrumEngineCount( void );
-const char *AUDIO_SpectrumEngineName( int e );
+/* Tap: kopia strumienia dla modułów DSP (np. widmo).
+ * Funkcja jest wołana w wątku wyjścia, w każdym bloku (także ciszy), po drifcie i PRZED regulacją głośności,
+ * więc analiza nie zależy od poziomu. Dane są tylko do odczytu. Nie wolno blokować ani używać Serial.
+ * Jeden odbiornik; NULL wyłącza. Wołać z loop(); odbiornik musi być gotowy, zanim zostanie zarejestrowany. */
+typedef void (*AUDIO_TapFn)(const int16_t *stereo, uint32_t frames);
+void AUDIO_SetTap(AUDIO_TapFn fn);
+
+/* Monotoniczny czas w us (do pomiarów diagnostycznych, np. kosztu analizy widma).
+ * Zegar dostarcza platforma (AUDIO/audio_clock.h). */
+uint32_t AUDIO_TimeUs(void);
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif /* AUDIO_H */
+#endif /* AUDIO_MANAGE_H */

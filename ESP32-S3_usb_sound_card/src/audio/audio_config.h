@@ -1,5 +1,6 @@
 /*
- * audio_config.h - wspólne parametry podsystemu audio (źródło -> FIFO -> drift -> wyjście)
+ * audio_config.h - parametry toru audio (źródło -> FIFO -> drift -> wyjście).
+ * Parametry analizatora widma: DSP/dsp_config.h.
  */
 #ifndef AUDIO_CONFIG_H
 #define AUDIO_CONFIG_H
@@ -25,7 +26,7 @@
 /* ---- FIFO ---- */
 #define AUDIO_FIFO_SIZE_BYTES   32768                       /* potęga 2; ok. 186 ms @44,1k, 85 ms @96k */
 #define AUDIO_FIFO_TARGET_MS    46                          /* punkt pracy i próg startu w ms (stały czas, nie bajty) */
-/* Cel dla częstotliwości startowej; dla bieżącej liczy go rdzeń (audio.cpp) z AUDIO_FIFO_TARGET_MS. */
+/* Cel dla częstotliwości startowej; dla bieżącej liczy go rdzeń (audio_manage.cpp) z AUDIO_FIFO_TARGET_MS. */
 #define AUDIO_FIFO_TARGET_BYTES ((AUDIO_SAMPLE_RATE_DEFAULT * AUDIO_BYTES_PER_FRAME / 1000) * AUDIO_FIFO_TARGET_MS)
 
 /* ---- Wybór źródła audio (kompilowany jeden) ---- */
@@ -37,36 +38,5 @@
 #ifndef AUDIO_VOL_POLL_MS
 #define AUDIO_VOL_POLL_MS       50
 #endif
-
-/* ---- Analizator widma ---- */
-#define AUDIO_SPECTRUM_FFT_N       4096    /* potęga 2; okno analizy (93 ms przy 44,1 kHz) */
-#define AUDIO_SPECTRUM_HOP         1024    /* co tyle nowych próbek liczymy FFT (512 = gładziej, 2x CPU) */
-#define AUDIO_SPECTRUM_F_LOW       30      /* Hz, dolna krawędź pierwszego pasma */
-#define AUDIO_SPECTRUM_F_HIGH      20000   /* Hz, górna krawędź ostatniego pasma */
-#define AUDIO_SPECTRUM_DB_TOP      (-15)   /* dB (energia pasma, 0 dB = sinus pełnej skali) = pełny słupek */
-#define AUDIO_SPECTRUM_DB_FLOOR    (-75)   /* dB = pusty słupek */
-/* Czas opadania słupka z pełnej skali do zera (ms), od najwolniejszego do najszybszego.
- * Regulowany w czasie pracy (ekran SPECTRUM, długie naciśnięcie B/D); przeliczany na krok na ramkę z hopa i częstotliwości
- * próbkowania, więc zmiana AUDIO_SPECTRUM_HOP nie zmienia wrażenia. */
-#define AUDIO_SPECTRUM_FALL_MS_LIST  { 1500, 1000, 700, 500, 350, 250, 150, 100 }
-#define AUDIO_SPECTRUM_FALL_DEFAULT  3     /* indeks na liście: 500 ms */
-#define AUDIO_SPECTRUM_PEAK_HOLD   20      /* ramki podtrzymania kreski szczytu */
-#define AUDIO_SPECTRUM_PEAK_FALL   4       /* opadanie kreski szczytu na ramkę */
-
-// Simon test
-// #define AUDIO_SPECTRUM_FFT_Q           -1.0f   /* 0 = jak dotąd, > 0 = Q, < 0 = auto */
-/* Silnik analizy pasm (przełączalny w czasie pracy: SPEC_SetEngine):
- *   0 = FFT (jedna FFT, pasma = sumy binów; słaba rozdzielczość w basie),
- *   1 = bank filtrów IIR (pasmowe biquady o stałym Q, rozdzielczość bez zmian w całym paśmie),
- *   2 = bank IIR z decymacją oktawową (to samo co 1, ale tańszy przy dużej liczbie pasm). */
-#define AUDIO_SPECTRUM_ENGINE_DEFAULT  1
-/* Bank IIR: liczba kaskadowanych sekcji biquad na pasmo, 1..4 (1 = 2. rząd, -12 dB/okt; 2 = 4. rząd, -24 dB/okt).
- * Krawędzie pasma (-3 dB) zostają w tym samym miejscu, zmienia się tylko stromość zboczy i koszt CPU. */
-#define AUDIO_SPECTRUM_IIR_SECTIONS    2
-/* Stała czasowa detektora energii: tau = max( TAU_MIN_MS, TAU_CYCLES / f0 ). Dla basu dłuższa (tłumi tętnienia 2*f0). */
-#define AUDIO_SPECTRUM_IIR_TAU_CYCLES  1.0f
-#define AUDIO_SPECTRUM_IIR_TAU_MIN_MS  10
-/* Korekta poziomu silnika IIR względem FFT (dB, + = wyżej). Bazowo szum biały daje ten sam poziom co FFT. */
-#define AUDIO_SPECTRUM_IIR_TRIM_DB     0.0f
 
 #endif /* AUDIO_CONFIG_H */

@@ -20,25 +20,25 @@
 #include "spectrum_engine.h"
 #include "spectrum_biquad.h"
 
-#ifndef AUDIO_SPECTRUM_IIR_SECTIONS
-#define AUDIO_SPECTRUM_IIR_SECTIONS   2
+#ifndef SPECTRUM_IIR_SECTIONS
+#define SPECTRUM_IIR_SECTIONS   2
 #endif
-#ifndef AUDIO_SPECTRUM_IIR_TAU_CYCLES
-#define AUDIO_SPECTRUM_IIR_TAU_CYCLES 1.0f
+#ifndef SPECTRUM_IIR_TAU_CYCLES
+#define SPECTRUM_IIR_TAU_CYCLES 1.0f
 #endif
-#ifndef AUDIO_SPECTRUM_IIR_TAU_MIN_MS
-#define AUDIO_SPECTRUM_IIR_TAU_MIN_MS 10
+#ifndef SPECTRUM_IIR_TAU_MIN_MS
+#define SPECTRUM_IIR_TAU_MIN_MS 10
 #endif
-#ifndef AUDIO_SPECTRUM_IIR_TRIM_DB
-#define AUDIO_SPECTRUM_IIR_TRIM_DB    0.0f
+#ifndef SPECTRUM_IIR_TRIM_DB
+#define SPECTRUM_IIR_TRIM_DB    0.0f
 #endif
 
-#define SECTIONS      ( AUDIO_SPECTRUM_IIR_SECTIONS )
+#define SECTIONS      ( SPECTRUM_IIR_SECTIONS )
 #if SECTIONS < 1 || SECTIONS > 4
-  #error "AUDIO_SPECTRUM_IIR_SECTIONS musi być z zakresu 1..4"
+  #error "SPECTRUM_IIR_SECTIONS musi być z zakresu 1..4"
 #endif
 #define CHUNK         256                    /* próbek na wejściu stopnia 0 w jednym przebiegu */
-#define MAX_BACKLOG   ( SPEC_RING_SIZE / 2 )
+#define MAX_BACKLOG   ( SPECTRUM_RING_SIZE / 2 )
 #define HANN_ENBW     1.5
 #define MR_MAX_STAGES 10                     /* fs/512 przy najgłębszym stopniu */
 #define MR_F_EDGE     0.40                   /* pasmo należy do stopnia, jeśli f_hi <= MR_F_EDGE * fs_stopnia */
@@ -46,30 +46,30 @@
 
 /* Filtr decymatora (znormalizowany do fs stopnia): eliptyczny 6. rzędu, pasmo 0..0,2 fs (zafalowanie 0,05 dB,
  * wzmocnienie 1.0 w DC, żeby dziewięć kolejnych stopni nie osłabiało basu), zaporowe >= 55 dB od 0,30 fs. */
-static const SpecBq_t kLpProto[ LP_SECTIONS ] = {
+static const SpectrumBq_t kLpProto[ LP_SECTIONS ] = {
 	{ 0.027153495081800694, 0.046953505889913517, 0.027153495081800701, -0.74358447649174342, 0.20562973773178161, 0, 0 },
 	{ 1, 0.7059801393346562, 0.99999999999999989, -0.57119155259768717, 0.52229498984464728, 0, 0 },
 	{ 1, 0.23027647949452978, 0.99999999999999989, -0.45835101446408744, 0.84897939370800557, 0, 0 },
 };
 
 typedef struct {
-	SpecBp_t sec[ SECTIONS ];
+	SpectrumBp_t sec[ SECTIONS ];
 	float    alpha, beta;
 	float    e;
 	uint8_t  stage;               /* stopień decymacji, na którym liczone jest pasmo */
 } MrBand_t;
 
-static MrBand_t s_mb[ SPEC_MAX_BARS ];
+static MrBand_t s_mb[ SPECTRUM_MAX_BARS ];
 static int      s_bars = 0;
 static int      s_stages = 1;                              /* liczba używanych stopni */
-static SpecBq_t s_lp[ MR_MAX_STAGES ][ LP_SECTIONS ];       /* decymator ze stopnia k na k+1 */
+static SpectrumBq_t s_lp[ MR_MAX_STAGES ][ LP_SECTIONS ];       /* decymator ze stopnia k na k+1 */
 static uint8_t  s_phase[ MR_MAX_STAGES ];                   /* indeks (0/1) następnej próbki do zachowania */
 static float    s_x[ CHUNK ];                               /* wejście bieżącego stopnia */
 static float    s_t[ CHUNK ];                               /* wyjście decymatora przed odrzuceniem próbek */
 static float    s_y[ CHUNK ];                               /* wyjścia kolejnych sekcji jednego pasma */
 static float    s_gain = 2.0f;
 
-#ifdef AUDIO_SPECTRUM_TEST
+#ifdef SPECTRUM_TEST
 uint32_t g_dbgWorkMr = 0;
 #endif
 
@@ -89,12 +89,12 @@ static void mrReset( void ) {
 	}
 }
 // ---------------------------------------------------------------------------------------------
-static void mrConfigure( uint32_t fs, const SpecBand_t * band, int bars ) {
+static void mrConfigure( uint32_t fs, const SpectrumBand_t * band, int bars ) {
 	double bwScale, enbwRatio;
-	float tauMin = (float)AUDIO_SPECTRUM_IIR_TAU_MIN_MS * 0.001f;
+	float tauMin = (float)SPECTRUM_IIR_TAU_MIN_MS * 0.001f;
 
-	SpecBp_CascadeScale( SECTIONS, &bwScale, &enbwRatio );
-	s_gain = (float)( 2.0 * HANN_ENBW / enbwRatio * pow( 10.0, (double)AUDIO_SPECTRUM_IIR_TRIM_DB / 10.0 ) );
+	SpectrumBp_CascadeScale( SECTIONS, &bwScale, &enbwRatio );
+	s_gain = (float)( 2.0 * HANN_ENBW / enbwRatio * pow( 10.0, (double)SPECTRUM_IIR_TRIM_DB / 10.0 ) );
 
 	for ( int k = 0; k < MR_MAX_STAGES; k++ ) memcpy( s_lp[ k ], kLpProto, sizeof( kLpProto ) );
 
@@ -103,7 +103,7 @@ static void mrConfigure( uint32_t fs, const SpecBand_t * band, int bars ) {
 	for ( int b = 0; b < bars; b++ ) {
 		int k = 0;
 		double fsk;
-		float tau = (float)AUDIO_SPECTRUM_IIR_TAU_CYCLES / band[ b ].f0;
+		float tau = (float)SPECTRUM_IIR_TAU_CYCLES / band[ b ].f0;
 		double beta;
 
 		/* najgłębszy stopień, w którym pasmo mieści się pod MR_F_EDGE * fs_k */
@@ -114,7 +114,7 @@ static void mrConfigure( uint32_t fs, const SpecBand_t * band, int bars ) {
 
 		if ( tau < tauMin ) tau = tauMin;
 		for ( int s = 0; s < SECTIONS; s++ ) {
-			SpecBp_Design( &s_mb[ b ].sec[ s ], fsk, (double)band[ b ].f_lo, (double)band[ b ].f_hi, bwScale );
+			SpectrumBp_Design( &s_mb[ b ].sec[ s ], fsk, (double)band[ b ].f_lo, (double)band[ b ].f_hi, bwScale );
 		}
 		beta = exp( -1.0 / ( fsk * (double)tau ) );
 		s_mb[ b ].beta = (float)beta;
@@ -128,11 +128,11 @@ static void runBand( MrBand_t * bd, const float * x, int cnt ) {
 	const float * in = x;
 
 	for ( int k = 0; k < SECTIONS; k++ ) {
-		SpecBp_Run( &bd->sec[ k ], in, s_y, cnt );
+		SpectrumBp_Run( &bd->sec[ k ], in, s_y, cnt );
 		in = s_y;
 	}
-	bd->e = SpecEnv_Run( bd->e, bd->alpha, bd->beta, s_y, cnt );
-#ifdef AUDIO_SPECTRUM_TEST
+	bd->e = SpectrumEnv_Run( bd->e, bd->alpha, bd->beta, s_y, cnt );
+#ifdef SPECTRUM_TEST
 	g_dbgWorkMr += (uint32_t)cnt * SECTIONS;
 #endif
 }
@@ -143,10 +143,10 @@ static int decimate( int k, int cnt ) {
 	int ph = s_phase[ k ], m = 0;
 
 	for ( int j = 0; j < LP_SECTIONS; j++ ) {
-		SpecBq_Run( &s_lp[ k ][ j ], in, s_t, cnt );
+		SpectrumBq_Run( &s_lp[ k ][ j ], in, s_t, cnt );
 		in = s_t;
 	}
-#ifdef AUDIO_SPECTRUM_TEST
+#ifdef SPECTRUM_TEST
 	g_dbgWorkMr += (uint32_t)cnt * LP_SECTIONS;
 #endif
 	for ( int i = ph; i < cnt; i += 2 ) s_x[ m++ ] = s_t[ i ];   /* zapis nie wyprzedza odczytu: m <= i */
@@ -165,7 +165,7 @@ static int mrProcess( uint32_t from, uint32_t to, float * power ) {
 		int cnt = (int)( ( n - done > CHUNK ) ? CHUNK : ( n - done ) );
 
 		for ( int i = 0; i < cnt; i++ ) {
-			s_x[ i ] = (float)g_specRing[ ( from + done + (uint32_t)i ) & SPEC_RING_MASK ] * ( 1.0f / 32768.0f );
+			s_x[ i ] = (float)g_spectrumRing[ ( from + done + (uint32_t)i ) & SPECTRUM_RING_MASK ] * ( 1.0f / 32768.0f );
 		}
 		for ( int k = 0; k < s_stages && cnt > 0; k++ ) {
 			for ( int b = 0; b < s_bars; b++ ) {
@@ -174,7 +174,7 @@ static int mrProcess( uint32_t from, uint32_t to, float * power ) {
 			if ( k < s_stages - 1 ) cnt = decimate( k, cnt );
 		}
 	}
-	if ( (uint32_t)( SpecRing_Wr() - from ) > (uint32_t)SPEC_RING_SIZE ) {   /* producent nadpisał dane w trakcie liczenia */
+	if ( (uint32_t)( SpectrumRing_Wr() - from ) > (uint32_t)SPECTRUM_RING_SIZE ) {   /* producent nadpisał dane w trakcie liczenia */
 		mrReset();
 		return 0;
 	}
@@ -182,4 +182,4 @@ static int mrProcess( uint32_t from, uint32_t to, float * power ) {
 	return 1;
 }
 // ---------------------------------------------------------------------------------------------
-const SpecEngine_t g_specEngineIirMr = { "IIR-MR", mrInit, mrConfigure, mrReset, mrProcess };
+const SpectrumEngine_t g_spectrumEngineIirMr = { "IIR-MR", mrInit, mrConfigure, mrReset, mrProcess };

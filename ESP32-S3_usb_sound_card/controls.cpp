@@ -4,7 +4,8 @@
  */
 #include <Arduino.h>
 
-#include "src/audio/audio.h"
+#include "src/audio_manage.h"
+
 #include "input.h"
 #include "ui_oled.h"
 #include "menu_oled.h"

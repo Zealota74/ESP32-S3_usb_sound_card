@@ -11,16 +11,22 @@
  ***************************************************************************/
 #include <Arduino.h>
 
-#include "src/audio/audio.h"
+#include "src/audio_manage.h"
+#include "src/dsp_manage.h"
 #include "input.h"
 #include "ui_oled.h"
 #include "controls.h"
 #include "audio_ui.h"
 
+// żeby mżna było programować przez ten sam port
+#include "USB.h"
+HWCDC NatywneUSB; 
+// =============================================
+
 /***************************************************************************
  *                              KONFIGURACJA
  ***************************************************************************/
-#define AUDIO_DIAG_SERIAL   0        /* 1 = co sekundę statystyki audio na Serial (źródło/FIFO fps, FIFO %, fs, blocks/s) */
+#define AUDIO_DIAG_SERIAL   1        /* 1 = co sekundę statystyki audio na Serial (źródło/FIFO fps, FIFO %, fs, blocks/s) */
 #define DIAG_PERIOD_MS      1000
 
 /* Głośność po starcie w dB (zakres od minimum do 0, 0 dB = pełna).
@@ -52,17 +58,25 @@ void setup() {
 		for ( ;; )
 			delay( 1000 );
 	}
+	DSP_Init();
+
+// żeby mżna było programować przez ten sam port
+	NatywneUSB.begin(115200);
+// =============================================
 
 	AUDIOUI_Init( STARTUP_VOL_DB );
 	CONTROLS_Init();                  /* po AUDIO_Init(): dwuklik zależy od limitu startowego */
-	Serial.println( "System ready" );
+	NatywneUSB.println( "System ready" );
 }
 // ----------------------------------------------------------------------------------------
 void loop() {
 	uint32_t now = millis();
 
 	INPUT_proc();                     /* enkoder + przyciski + IR (callbacki w controls.cpp) */
+	
 	AUDIO_Poll( now );                /* źródło, głośność, limit startowy, widmo */
+	DSP_Poll();
+
 	AUDIOUI_Sync( now );              /* audio -> UI */
 	UI_Loop( now );
 

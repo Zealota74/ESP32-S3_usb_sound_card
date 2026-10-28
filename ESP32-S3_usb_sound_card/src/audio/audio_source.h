@@ -43,9 +43,9 @@ typedef struct {
   uint32_t (*get_sample_rate)(void);
 } AUDIO_Source_t;
 
-/* Dostępne źródła (definiowane w ich plikach, wybór w audio_config.h). */
-extern const AUDIO_Source_t AUDIO_SRC_USB;    /* usb_soundcard.cpp */
-/* extern const AUDIO_Source_t AUDIO_SRC_WIFI;   audio_src_wifi.cpp (przyszłość) */
+/* Dostępne źródła (definiowane w HARDWARE/, wybór w audio_config.h). */
+extern const AUDIO_Source_t AUDIO_SRC_USB;    /* HARDWARE/usb_soundcard.cpp */
+/* extern const AUDIO_Source_t AUDIO_SRC_WIFI;   HARDWARE/audio_src_wifi.cpp (przyszłość) */
 
 #ifdef __cplusplus
 }

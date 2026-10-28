@@ -5,8 +5,8 @@
 #include <Arduino.h>
 #include "driver/i2s_std.h"
 
-#include "audio_config.h"
-#include "audio_out.h"
+#include "../AUDIO/audio_config.h"
+#include "../AUDIO/audio_out.h"
 
 /* ---- Konfiguracja sprzętowa (można nadpisać przed kompilacją) ---- */
 #ifndef AUDIO_I2S_PIN_BCLK
@@ -139,8 +139,4 @@ int AUDIO_OUT_Start( AUDIO_OutFillFn fill, void * ctx ) {
 // ---------------------------------------------------------------------------------------------
 uint32_t AUDIO_OUT_GetErrors( void ) {
 	return s_errors;
-}
-// ---------------------------------------------------------------------------------------------
-uint32_t AUDIO_OUT_TimeUs( void ) {
-	return (uint32_t)micros();
 }

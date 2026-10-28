@@ -3,7 +3,8 @@
  */
 #include <Arduino.h>
 
-#include "src/audio/audio.h"
+#include "src/audio_manage.h"
+#include "src/dsp_manage.h"
 #include "ui_oled.h"
 #include "audio_ui.h"
 
@@ -41,19 +42,19 @@ static void syncVolume( void ) {
 // ---------------------------------------------------------------------------------------------
 static void syncSpectrum( uint32_t now ) {
 	static uint32_t tOled = 0;
-	AUDIO_Spectrum_t sp;
+	DSP_Spectrum_t sp;
 	int viz = ( UI_GetScreen() == UI_SCREEN_SPECTRUM );
 
 	/* widmo liczone tylko na ekranie SPECTRUM (FFT w AUDIO_Poll, czyli w tym samym wątku) */
-	AUDIO_SpectrumEnable( viz );
-	if ( viz && AUDIO_GetSpectrum( &sp ) ) UI_SetSpectrum( sp.level, sp.peak, sp.bars );
+	DSP_SpectrumEnable( viz );
+	if ( viz && DSP_GetSpectrum( &sp ) ) UI_SetSpectrum( sp.level, sp.peak, sp.bars );
 
 	if ( now - tOled >= OLED_PERIOD_MS ) {
 		AUDIO_Stats_t st;
 
 		tOled = now;
 		AUDIO_GetStats( &st, 0 );
-		UI_SetDebug( st.blocks, st.fifo_bytes, st.src.packets, st.fft_us );
+		UI_SetDebug( st.blocks, st.fifo_bytes, st.src.packets, DSP_SpectrumGetUs() );
 	}
 }
 // =============================================================================================

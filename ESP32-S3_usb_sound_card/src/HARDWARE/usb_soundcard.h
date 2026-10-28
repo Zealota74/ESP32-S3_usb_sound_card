@@ -10,8 +10,8 @@
 #define USB_SOUNDCARD_H
 
 #include <stdint.h>
-#include "audio_types.h"
-#include "audio_source.h"
+#include "../AUDIO/audio_types.h"
+#include "../AUDIO/audio_source.h"
 
 #ifdef __cplusplus
 extern "C" {

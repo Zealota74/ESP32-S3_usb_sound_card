@@ -14,7 +14,7 @@
 // ---------------------------------------------------------------------------------------------
 /* Analogowy prototyp H(s) = BW*s / ( s^2 + BW*s + W0^2 ) w osi z pre-warpingiem (W = tan(pi*f/fs)),
  * s = ( 1 - z^-1 ) / ( 1 + z^-1 ). */
-void SpecBp_Design( SpecBp_t * q, double fs, double fl, double fh, double bwScale ) {
+void SpectrumBp_Design( SpectrumBp_t * q, double fs, double fl, double fh, double bwScale ) {
 	double w1 = tan( PI_D * fl / fs );
 	double w2 = tan( PI_D * fh / fs );
 	double bw = ( w2 - w1 ) * bwScale;
@@ -28,7 +28,7 @@ void SpecBp_Design( SpecBp_t * q, double fs, double fl, double fh, double bwScal
 	q->z2 = 0.0f;
 }
 // ---------------------------------------------------------------------------------------------
-void SpecBp_CascadeScale( int n, double * bwScale, double * enbwRatio ) {
+void SpectrumBp_CascadeScale( int n, double * bwScale, double * enbwRatio ) {
 	/* Równoważna szerokość szumowa kaskady n sekcji 2. rzędu = K(n) * BW sekcji, gdzie
 	 * K(n) = 0.5 * sqrt(pi) * Gamma(n - 1/2) / Gamma(n). */
 	static const double kEnbw[ 4 ] = { 1.5707963, 0.7853982, 0.5890486, 0.4908739 };
@@ -44,7 +44,7 @@ void SpecBp_CascadeScale( int n, double * bwScale, double * enbwRatio ) {
 }
 // ---------------------------------------------------------------------------------------------
 /* Współczynniki i stan siedzą w rejestrach FPU przez cały przebieg. */
-void SpecBp_Run( SpecBp_t * q, const float * in, float * out, int cnt ) {
+void SpectrumBp_Run( SpectrumBp_t * q, const float * in, float * out, int cnt ) {
 	const float b0 = q->b0, a1 = q->a1, a2 = q->a2;
 	float z1 = q->z1, z2 = q->z2;
 
@@ -63,7 +63,7 @@ void SpecBp_Run( SpecBp_t * q, const float * in, float * out, int cnt ) {
 	q->z2 = z2;
 }
 // ---------------------------------------------------------------------------------------------
-void SpecBq_Run( SpecBq_t * q, const float * in, float * out, int cnt ) {
+void SpectrumBq_Run( SpectrumBq_t * q, const float * in, float * out, int cnt ) {
 	const float b0 = q->b0, b1 = q->b1, b2 = q->b2, a1 = q->a1, a2 = q->a2;
 	float z1 = q->z1, z2 = q->z2;
 
@@ -82,7 +82,7 @@ void SpecBq_Run( SpecBq_t * q, const float * in, float * out, int cnt ) {
 }
 // ---------------------------------------------------------------------------------------------
 /* Jedna operacja w pętli zależności: e = e*beta + (alpha*y)*y. */
-float SpecEnv_Run( float e, float alpha, float beta, const float * y, int cnt ) {
+float SpectrumEnv_Run( float e, float alpha, float beta, const float * y, int cnt ) {
 	for ( int i = 0; i < cnt; i++ ) e = e * beta + ( alpha * y[ i ] ) * y[ i ];
 	if ( e < TINY ) e = 0.0f;
 	return e;

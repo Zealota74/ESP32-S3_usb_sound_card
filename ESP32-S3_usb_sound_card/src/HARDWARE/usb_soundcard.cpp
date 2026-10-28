@@ -10,7 +10,7 @@
 #include <string.h>
 
 #include "usb_soundcard.h"
-#include "audio_config.h"
+#include "../AUDIO/audio_config.h"
 
 // ============================================================================================
 /* Zdarzenia hosta (głośność / mute). Działa w tasku pętli zdarzeń ESP-IDF. */

@@ -1,19 +1,19 @@
 /*
- * audio.cpp - rdzeń podsystemu audio (kod niezależny od platformy).
+ * audio_manage.cpp - zarządca toru audio (kod niezależny od platformy).
  *
- * Łączy: źródło (audio_source.h) -> FIFO -> drift -> mnożnik głośności -> wyjście (audio_out.h).
- * Nie zawiera nic z USB, I2S ani Arduino.
+ * Łączy: źródło (audio_source.h) -> FIFO -> drift -> [tap dla DSP] -> mnożnik głośności -> wyjście (audio_out.h).
+ * Nie zawiera nic z USB, I2S, Arduino ani analizy widma.
  */
 #include <math.h>
 #include <string.h>
 
-#include "audio.h"
-#include "audio_config.h"
-#include "audio_out.h"
-#include "audio_source.h"
-#include "audio_spectrum.h"
-#include "fifo.h"
-#include "drift.h"
+#include "audio_manage.h"
+#include "AUDIO/audio_clock.h"
+#include "AUDIO/audio_config.h"
+#include "AUDIO/audio_out.h"
+#include "AUDIO/audio_source.h"
+#include "AUDIO/fifo.h"
+#include "AUDIO/drift.h"
 
 #if AUDIO_SOURCE == AUDIO_SOURCE_USB
   #define AUDIO_SOURCE_OPS   (&AUDIO_SRC_USB)
@@ -39,7 +39,6 @@ static const AUDIO_Source_t * s_src = NULL;
 static volatile uint32_t s_rate = AUDIO_SAMPLE_RATE;
 static volatile uint32_t s_rateReq = AUDIO_SAMPLE_RATE;
 static uint32_t s_srcRateSeen = AUDIO_SAMPLE_RATE;
-static uint32_t s_specRate = AUDIO_SAMPLE_RATE;
 static bool     s_run = false;   /* tylko task wyjścia: trwa odtwarzanie (po prefillu) */
 static uint32_t s_fifoTarget = AUDIO_FIFO_TARGET_BYTES;
 
@@ -55,12 +54,8 @@ static volatile bool  s_guardActive = true;
 static volatile float s_gainTarget = 0.0f;
 static volatile float s_guardGain = 1.0f;
 
-/* Widmo: liczone w loop (AUDIO_Poll), tylko gdy włączone. */
-static bool     s_specOn = false;
-static uint32_t s_specSeq = 0, s_specReadSeq = 0;
-static uint32_t s_fftUs = 0;                 /* czas silnika widma na jeden hop próbek (us), średnia z okna */
-static uint32_t s_fftAccUs = 0;              /* okno uśredniania: suma czasów SPEC_Process ... */
-static uint32_t s_fftAccN = 0;               /* ... i suma próbek audio, które objęły te wywołania */
+/* Tap dla DSP: ustawia loop (AUDIO_SetTap), wywołuje task wyjścia. Wskaźnik 32-bitowy, zapis atomowy. */
+static AUDIO_TapFn volatile s_tap = NULL;
 
 /* Cache głośności (odświeżany w AUDIO_Poll) i znacznik czasu ostatniego odświeżenia. */
 static AUDIO_Volume_t s_vol;
@@ -79,12 +74,6 @@ static bool rateSupported( uint32_t rate ) {
 		if ( kRates[ i ] == rate ) return true;
 	}
 	return false;
-}
-// ---------------------------------------------------------------------------------------------
-/* Zaczyna nowe okno pomiaru czasu widma (po zmianie liczby słupków, częstotliwości, włączeniu widma). */
-static void fftStatReset( void ) {
-	s_fftAccUs = 0;
-	s_fftAccN = 0;
 }
 // ---------------------------------------------------------------------------------------------
 uint32_t AUDIO_Push( const uint8_t * data, uint32_t bytes ) {
@@ -138,7 +127,11 @@ static void audioFill( int16_t * out, uint32_t frames, void * ctx ) {
 	}
 	s_playing = s_run;
 
-	SPEC_Feed( out, frames ); /* tap dla widma: po drift, przed głośnością (widmo nie zależy od poziomu) */
+	{ /* tap dla DSP: po drift, przed głośnością (analiza nie zależy od poziomu) */
+		AUDIO_TapFn tap = s_tap;
+
+		if ( tap != NULL ) tap( out, frames );
+	}
 
 	/* głośność (źródło + limit startowy): jeden mnożnik z rampą w obrębie bloku (bez trzasków) */
 	gNew = s_gainTarget * ( s_guardActive ? s_guardGain : 1.0f );
@@ -164,15 +157,13 @@ int AUDIO_Init( const AUDIO_Config_t * cfg ) {
 	s_src = AUDIO_SOURCE_OPS;
 	if ( s_src->init == NULL ) return AUDIO_ERR_PARAM;
 
-	s_rate = s_rateReq = s_srcRateSeen = s_specRate = AUDIO_SAMPLE_RATE;
+	s_rate = s_rateReq = s_srcRateSeen = AUDIO_SAMPLE_RATE;
 	s_fifoTarget = fifoTargetBytes( s_rate );
 
 	if ( !FIFO_Init( &s_fifo, s_fifoStorage, AUDIO_FIFO_SIZE_BYTES, AUDIO_BYTES_PER_FRAME ) ||
 	     !DRIFT_Init( &s_drift, &s_fifo, s_fifoTarget ) ) {
 		return AUDIO_ERR_FIFO;
 	}
-
-	SPEC_Init( s_rate );
 
 	oc.sample_rate  = s_rate;
 	oc.channels     = AUDIO_CHANNELS;
@@ -214,12 +205,6 @@ void AUDIO_Poll( uint32_t now_ms ) {
 			if ( rateSupported( r ) ) s_rateReq = r;
 		}
 	}
-	/* widmo podąża za rzeczywistą częstotliwością wyjścia (SPEC_* wołamy tylko z loop) */
-	if ( s_rate != s_specRate ) {
-		s_specRate = s_rate;
-		SPEC_SetRate( s_specRate );
-		fftStatReset();
-	}
 
 	if ( s_src->get_volume != NULL && now_ms - s_tVol >= AUDIO_VOL_POLL_MS ) {
 		s_tVol = now_ms;
@@ -229,22 +214,6 @@ void AUDIO_Poll( uint32_t now_ms ) {
 		}
 		/* mute strony sterującej wycisza też wyjście (wcześniej tylko zmieniał napis na OLED) */
 		s_gainTarget = s_vol.mute ? 0.0f : s_vol.gain;
-	}
-
-	if ( s_specOn ) {
-		uint32_t t0 = AUDIO_OUT_TimeUs();
-		if ( SPEC_Process() ) {
-			/* Czas jednego wywołania zależy od zaległości próbek (silnik IIR liczy wszystkie próbki od ostatniego
-			 * wywołania, a okres loop() zmienia się z zapełnieniem ekranu), więc uśredniamy w oknie ok. 0,5 s
-			 * i normalizujemy do jednego hopa: us na AUDIO_SPECTRUM_HOP próbek. Budżet = hop / fs (np. 21,3 ms @48 kHz). */
-			s_fftAccUs += AUDIO_OUT_TimeUs() - t0;
-			s_fftAccN  += SPEC_GetLastBlock();
-			s_specSeq++;
-			if ( s_fftAccN >= s_rate / 2 ) {
-				s_fftUs = (uint32_t)( (uint64_t)s_fftAccUs * AUDIO_SPECTRUM_HOP / s_fftAccN );
-				fftStatReset();
-			}
-		}
 	}
 }
 // ---------------------------------------------------------------------------------------------
@@ -276,62 +245,6 @@ void AUDIO_GuardRelease( void ) {
 	s_guardActive = false;
 }
 // ---------------------------------------------------------------------------------------------
-void AUDIO_SpectrumEnable( int on ) {
-	if ( on && !s_specOn ) {
-		SPEC_Reset();
-		fftStatReset();
-		s_specReadSeq = s_specSeq;
-	}
-	s_specOn = ( on != 0 );
-}
-// ---------------------------------------------------------------------------------------------
-void AUDIO_SpectrumSetBars( int bars ) {
-	SPEC_SetBars( bars );
-	fftStatReset();
-}
-// ---------------------------------------------------------------------------------------------
-int AUDIO_SpectrumGetBars( void ) {
-	return SPEC_GetBars();
-}
-// ---------------------------------------------------------------------------------------------
-void AUDIO_SpectrumCycleBars( int dir ) {
-	static const int opts[] = { 7, 16, 32, 64 };
-	const int n = (int)( sizeof( opts ) / sizeof( opts[ 0 ] ) );
-	int cur = SPEC_GetBars();
-	int idx = 1;
-
-	for ( int i = 0; i < n; i++ ) {
-		if ( opts[ i ] == cur ) idx = i;
-	}
-	idx = ( idx + ( dir >= 0 ? 1 : n - 1 ) ) % n;
-	SPEC_SetBars( opts[ idx ] );
-	fftStatReset();
-}
-// ---------------------------------------------------------------------------------------------
-void AUDIO_SpectrumFallStep( int dir ) {
-	SPEC_SetFall( SPEC_GetFall() + ( dir >= 0 ? 1 : -1 ) );
-}
-// ---------------------------------------------------------------------------------------------
-int AUDIO_SpectrumGetFallMs( void ) {
-	return (int)SPEC_GetFallMs();
-}
-// ---------------------------------------------------------------------------------------------
-int AUDIO_SpectrumFallIndex( void ) {
-	return SPEC_GetFall();
-}
-// ---------------------------------------------------------------------------------------------
-int AUDIO_SpectrumFallSteps( void ) {
-	return SPEC_FallSteps();
-}
-// ---------------------------------------------------------------------------------------------
-int AUDIO_GetSpectrum( AUDIO_Spectrum_t * out ) {
-	if ( s_specSeq == s_specReadSeq ) return 0;
-	s_specReadSeq = s_specSeq;
-	out->bars = (uint8_t)SPEC_GetBars();
-	SPEC_GetFrame( out->level, out->peak );
-	return 1;
-}
-// ---------------------------------------------------------------------------------------------
 void AUDIO_GetStats( AUDIO_Stats_t * out, int reset_minmax ) {
 	uint32_t fMin = s_fifoMin, fMax = s_fifoMax;
 	bool playing = s_playing;
@@ -352,16 +265,17 @@ void AUDIO_GetStats( AUDIO_Stats_t * out, int reset_minmax ) {
 	out->fifo_min = fMin;
 	out->fifo_max = fMax;
 	out->consumed_frames = DRIFT_GetConsumedFrames( &s_drift );
-	out->fft_us = s_fftUs;
 	out->sample_rate = s_rate;
 	out->drift_ppm = playing ? (int32_t)( ( DRIFT_GetRatio( &s_drift ) - 1.0f ) * 1000000.0f ) : 0;
 
 	memset( &out->src, 0, sizeof( out->src ) );
 	if ( s_src != NULL && s_src->get_stats != NULL ) s_src->get_stats( &out->src );
 }
-
-
-int         AUDIO_SpectrumGetEngine( void )          { return SPEC_GetEngine(); }
-void        AUDIO_SpectrumSetEngine( int e )         { SPEC_SetEngine( e ); }
-int         AUDIO_SpectrumEngineCount( void )        { return SPEC_ENGINE_COUNT; }
-const char *AUDIO_SpectrumEngineName( int e )        { return SPEC_EngineName( e ); }
+// ---------------------------------------------------------------------------------------------
+void AUDIO_SetTap( AUDIO_TapFn fn ) {
+	s_tap = fn;
+}
+// ---------------------------------------------------------------------------------------------
+uint32_t AUDIO_TimeUs( void ) {
+	return AUDIO_CLOCK_TimeUs();
+}
