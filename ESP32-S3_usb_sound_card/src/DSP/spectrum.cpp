@@ -13,7 +13,7 @@
 #include "spectrum_engine.h"
 
 int16_t                  g_spectrumRing[ SPECTRUM_RING_SIZE ];
-static volatile uint32_t s_wr = 0;          /* licznik zapisanych próbek (zapis: wątek audio) */
+static uint32_t          s_wr = 0;          /* licznik zapisanych próbek */
 static uint32_t          s_lastWr = 0;      /* wartość s_wr przy ostatniej analizie */
 static uint32_t          s_lastBlock = 0;   /* ile próbek objęło ostatnie wywołanie silnika */
 
@@ -40,7 +40,7 @@ const float * SPECTRUM_DebugBandPower( void ) { return s_bandPow; }
 
 // ---------------------------------------------------------------------------------------------
 uint32_t SpectrumRing_Wr( void ) {
-	return __atomic_load_n( &s_wr, __ATOMIC_ACQUIRE );
+	return s_wr;
 }
 // ---------------------------------------------------------------------------------------------
 /* Pasma logarytmiczne F_LOW..F_HIGH (górna krawędź ograniczona do 0,49 fs). */
@@ -122,7 +122,7 @@ void SPECTRUM_Feed( const int16_t * stereo, uint32_t frames ) {
 	for ( uint32_t i = 0; i < frames; i++ ) {
 		g_spectrumRing[ ( wr + i ) & SPECTRUM_RING_MASK ] = (int16_t)( ( (int32_t)stereo[ i * 2 ] + (int32_t)stereo[ i * 2 + 1 ] ) >> 1 );
 	}
-	__atomic_store_n( &s_wr, wr + frames, __ATOMIC_RELEASE ); /* dane muszą być widoczne przed przesunięciem wr */
+	s_wr = wr + frames;
 }
 // ---------------------------------------------------------------------------------------------
 void SPECTRUM_SetBars( int bars ) {
@@ -162,6 +162,12 @@ void SPECTRUM_Reset( void ) {
 	memset( s_hold, 0, sizeof( s_hold ) );
 	kEngine[ s_engine ]->reset();
 	s_lastWr = SpectrumRing_Wr();   /* analiza zaczyna od próbek, które przyjdą po resecie */
+}
+// ---------------------------------------------------------------------------------------------
+void SPECTRUM_Resync( void ) {
+	memset( g_spectrumRing, 0, sizeof( g_spectrumRing ) );   /* okno FFT nie może mieszać próbek sprzed i po przerwie */
+	kEngine[ s_engine ]->reset();
+	s_lastWr = s_wr;   /* analiza zaczyna od próbek, które przyjdą po przerwie; słupki zostają */
 }
 // ---------------------------------------------------------------------------------------------
 /* Moc pasm -> słupki: dB, skala 0..255, szybkie narastanie, wolne opadanie, kreska szczytu. */

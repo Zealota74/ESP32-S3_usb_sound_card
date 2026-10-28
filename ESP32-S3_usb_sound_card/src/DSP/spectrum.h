@@ -1,10 +1,11 @@
 /*
  * spectrum.h - analizator widma (FFT) dla toru audio. Kod niezależny od platformy.
  *
- * Producent (wątek audio): SPECTRUM_Feed() zapisuje próbki mono do bufora kołowego.
- * Konsument (loop): SPECTRUM_Process() co SPECTRUM_HOP nowych próbek liczy moc pasm
+ * SPECTRUM_Feed() zapisuje próbki mono do bufora kołowego (historia okna analizy).
+ * SPECTRUM_Process() co SPECTRUM_HOP nowych próbek liczy moc pasm
  * logarytmicznych (7/16/32/64) wybranym silnikiem i wygładza słupki (szybkie narastanie,
- * wolne opadanie, kreska szczytu z podtrzymaniem). Wszystko poza SPECTRUM_Feed() wołać z jednego wątku.
+ * wolne opadanie, kreska szczytu z podtrzymaniem). Cały moduł jest jednowątkowy: wszystkie funkcje woła ten sam
+ * wątek (loop). Przekazanie próbek z wątku audio i politykę zaległości prowadzi dsp_manage.
  *
  * Silniki analizy pasm (przełączane w czasie pracy):
  *   SPECTRUM_ENGINE_FFT - FFT N punktów (okno Hanna, przesuwane), pasma = sumy mocy binów,
@@ -30,7 +31,7 @@ extern "C" {
 
 void SPECTRUM_Init(uint32_t sample_rate);
 
-/* Producent: ramki stereo int16 (L,R,L,R...), zapisywane jako mono (L+R)/2. */
+/* Dopisuje ramki stereo int16 (L,R,L,R...) jako mono (L+R)/2. Wołać z tego samego wątku co SPECTRUM_Process(). */
 void SPECTRUM_Feed(const int16_t *stereo, uint32_t frames);
 
 /* Zmiana częstotliwości próbkowania w czasie pracy: przelicza pasma i czas opadania, zeruje słupki.
@@ -63,6 +64,10 @@ uint32_t SPECTRUM_GetFallMs(void);
 
 /* Zeruje słupki i szczyty (np. po włączeniu ekranu). */
 void SPECTRUM_Reset(void);
+
+/* Nieciągłość strumienia (utracone próbki): zeruje historię okna i stan silnika, ale zostawia słupki
+ * (opadają same). Analiza rusza od próbek, które przyjdą po wywołaniu. */
+void SPECTRUM_Resync(void);
 
 /* Liczy kolejną ramkę, jeśli przybyło dość próbek. Zwraca 1, gdy powstała nowa ramka. */
 int  SPECTRUM_Process(void);

@@ -3,6 +3,9 @@
  *
  * Podłącza się do toru audio przez AUDIO_SetTap() (audio_manage.h), więc tor audio nie wie o DSP,
  * a DSP korzysta tylko z kopii strumienia (po drifcie, przed regulacją głośności - widmo nie zależy od poziomu).
+ * Tap tylko kopiuje ramki do kolejki (bez blokowania), a DSP_Poll() przenosi je do analizatora w porcjach ograniczonych
+ * w czasie. Gdy loop() spóźni się bardziej niż tolerancja kolejki, zaległość jest porzucana, a analizator resetowany
+ * (patrz DSP_GetStats). Analizator jest jednowątkowy i nie zna wątku audio.
  * Silniki widma (FFT, IIR, IIR-MR) i ich parametry: DSP/ (dsp_config.h).
  *
  * Użycie:
@@ -54,6 +57,16 @@ const char *DSP_SpectrumEngineName(int e);
  * (0 = jeszcze nie policzona). Dawniej AUDIO_Stats_t.fft_us.
  * Budżet = hop / fs; obciążenie % = czas * fs / ( HOP * 1e4 ). */
 uint32_t DSP_SpectrumGetUs(void);
+
+/* Diagnostyka kolejki między wątkiem audio a loop(). backlog_max = największa zaległość (ramki stereo) od ostatniego
+ * odczytu z reset_minmax = 1; backlog_limit = próg, powyżej którego zaległość jest porzucana (luka); gaps = liczba takich
+ * luk od DSP_Init(). Zaległość w ms = ramki * 1000 / częstotliwość próbkowania. */
+typedef struct {
+  uint32_t backlog_max;
+  uint32_t backlog_limit;
+  uint32_t gaps;
+} DSP_Stats_t;
+void DSP_GetStats(DSP_Stats_t *out, int reset_minmax);
 
 #ifdef __cplusplus
 }

@@ -23,7 +23,7 @@
 #endif
 
 extern int16_t g_spectrumRing[ SPECTRUM_RING_SIZE ];
-uint32_t       SpectrumRing_Wr( void );        /* licznik zapisanych próbek (odczyt atomowy, acquire) */
+uint32_t       SpectrumRing_Wr( void );        /* licznik zapisanych próbek */
 
 /* Pasmo analizy w hercach; krawędzie -3 dB, f0 = środek geometryczny. */
 typedef struct {

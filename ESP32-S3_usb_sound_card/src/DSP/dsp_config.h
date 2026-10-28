@@ -36,4 +36,18 @@
 /* Korekta poziomu silnika IIR względem FFT (dB, + = wyżej). Bazowo szum biały daje ten sam poziom co FFT. */
 #define SPECTRUM_IIR_TRIM_DB     0.0f
 
+/* ---- Kolejka tap -> loop (dsp_manage) ----
+ * Wątek audio kopiuje ramki stereo do kolejki, a loop() (DSP_Poll) przenosi je do analizatora. Gdy loop() nie nadąża,
+ * kolejka nadpisuje najstarsze ramki, a dsp_manage wykrywa lukę, porzuca zaległość i resetuje analizator.
+ * Tolerancja spóźnienia loop() = ( FRAMES - GUARD ) / fs, czyli ok. 81 ms przy 44,1 kHz i wartościach domyślnych. */
+#ifndef DSP_QUEUE_FRAMES
+#define DSP_QUEUE_FRAMES        4096   /* potęga 2; ramki stereo int16 (4 B każda), czyli 16 KB RAM */
+#endif
+#define DSP_QUEUE_GUARD_FRAMES  512    /* zapas na blok zapisywany w trakcie odczytu; musi być >= AUDIO_BLOCK_FRAMES */
+/* Ile hopów analizy loop() przekazuje silnikowi w jednym DSP_Poll(). Ogranicza czas jednego wywołania (silnik IIR liczy
+ * wszystkie przekazane próbki); reszta zaległości czeka w kolejce. Musi być <= SPECTRUM_FFT_N / SPECTRUM_HOP. */
+#ifndef DSP_POLL_MAX_HOPS
+#define DSP_POLL_MAX_HOPS       2
+#endif
+
 #endif /* DSP_CONFIG_H */
