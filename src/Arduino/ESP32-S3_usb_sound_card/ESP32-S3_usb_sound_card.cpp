@@ -18,9 +18,6 @@
 #include "controls.h"
 #include "audio_ui.h"
 
-// żeby mżna było programować przez ten sam port
-#include "USB.h"
-HWCDC NatywneUSB; 
 // =============================================
 
 /***************************************************************************
@@ -60,13 +57,8 @@ void setup() {
 	}
 	DSP_Init();
 
-// żeby mżna było programować przez ten sam port
-	NatywneUSB.begin(115200);
-// =============================================
-
 	AUDIOUI_Init( STARTUP_VOL_DB );
 	CONTROLS_Init();                  /* po AUDIO_Init(): dwuklik zależy od limitu startowego */
-	NatywneUSB.println( "System ready" );
 }
 // ----------------------------------------------------------------------------------------
 void loop() {

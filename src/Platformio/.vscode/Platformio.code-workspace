@@ -1,0 +1,11 @@
+{
+	"folders": [
+		{ "path": ".." },
+		{ "path": "../../Arduino/ESP32-S3_usb_sound_card" },
+		{ "path": "." }
+	],
+	"settings": {
+		"C_Cpp.default.compileCommands": "D:/00_Programowanie/01_Workspaces/10_GIT_projects/01_Claude/ESP32_usb_sound_card/ESP32-S3_usb_sound_card/src/Platformio/compile_commands.json",
+		"C_Cpp.default.compilerPath": "C:/Users/simon/.platformio/packages/toolchain-xtensa-esp-elf/bin/xtensa-esp32s3-elf-gcc.exe"
+	}
+}
